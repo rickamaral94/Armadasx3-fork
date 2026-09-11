@@ -608,7 +608,8 @@ void jit_announce(uptr, usz, std::string_view);
                 state == system_state::stopping ? "stopping" : "running");
   }
 
-  fmt::append(buf, "\nBuild: \"%s\"", rpcs3::get_verbose_version());
+  fmt::append(buf, "\nBuild: \"%s\" [%s]", rpcs3::get_verbose_version(),
+              ARMSX3_BUILD_STAMP);
   fmt::append(buf, "\nDate: \"%s\"", std::chrono::system_clock::now());
 
   __android_log_write(ANDROID_LOG_FATAL, "RPCS3", buf.c_str());
@@ -3301,6 +3302,14 @@ extern "C" bool _rpcsx_initialize(std::string_view rootDir,
     log_file = logs::make_file_listener(fs::get_log_dir() + "ARMSX3.log",
                                         stats.avail_free / 4);
   }
+
+  // First thing in the log, because everything after it is only interpretable
+  // against the binary that produced it. The commit alone is not enough: the
+  // shipped variants differ only in API level and -march, so two logs from the
+  // same commit can describe different code. ARMSX3_BUILD_STAMP comes from
+  // android/CMakeLists.txt and carries what cmake actually used.
+  rpcsx_android.success("ARMSX3 build: %s [%s]",
+                        rpcs3::get_verbose_version(), ARMSX3_BUILD_STAMP);
 
   // Mesa driver options, from <root>/driver_env.txt, one NAME=VALUE per line.
   //

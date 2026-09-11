@@ -30,8 +30,15 @@ else()
 		# revision entirely -- A53/A72/A73 are 8.0 and A55/A75 onwards are 8.2. An armv8.1 build
 		# therefore faults on exactly the old devices a fallback exists for, while running only on
 		# parts that already handle 8.2. It is 8.0 or it is pointless.
+		# CACHE, so the value is readable outside this directory. ConfigureCompiler
+		# is included from rpcs3/CMakeLists.txt, and a plain set() there is scoped
+		# to that subdirectory -- android/ is a SIBLING and saw nothing unless the
+		# value came from the command line. A build knob that cannot be read back
+		# cannot be reported, and a binary that does not say which -march produced
+		# it is not something you can attach a measurement to.
 		if (NOT DEFINED ARMSX3_ARM_MARCH)
-			set(ARMSX3_ARM_MARCH "armv8.2-a+dotprod+fp16")
+			set(ARMSX3_ARM_MARCH "armv8.2-a+dotprod+fp16" CACHE STRING
+				"ARM architecture passed to -march for the emulator core")
 		endif()
 		check_cxx_compiler_flag("-march=${ARMSX3_ARM_MARCH}" COMPILER_ARM)
 	endif()

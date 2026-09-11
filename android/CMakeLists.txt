@@ -172,3 +172,52 @@ elseif(ARMSX3_PGO STREQUAL "use")
 
     message(STATUS "ARMSX3: PGO optimising against ${ARMSX3_PGO_PROFILE}")
 endif()
+
+# ---------------------------------------------------------------------------
+# Build stamp
+#
+# The git commit already reaches the binary through rpcs3/git-version.h. What it
+# does NOT carry is how that commit was COMPILED, and on this fork that is half
+# the experiment: the variants in android/build-variants.sh differ only in API
+# level and -march, and the toolchain phase compares build type, LTO and PGO. Two
+# binaries built from the same commit with different flags report the same
+# version today, which makes a measurement impossible to attach to the thing it
+# measured.
+#
+# Read at configure time and baked in as a string rather than reconstructed by
+# the app: these are the values CMake actually used, including the ones nobody
+# passed explicitly.
+#
+# Printed to the log at startup. NOT exposed to the UI yet -- that needs a new
+# symbol through native-lib.cpp's dlsym table, the Kotlin bridge and NativeApp,
+# and none of it can be compiled in the environment this was written in.
+# ---------------------------------------------------------------------------
+string(JOIN " " ARMSX3_BUILD_STAMP_TEXT
+    "type=${CMAKE_BUILD_TYPE}"
+    "march=${ARMSX3_ARM_MARCH}"
+    "api=${ANDROID_PLATFORM}"
+    "abi=${ANDROID_ABI}"
+    "lto=${USE_LTO}"
+    "pgo=${ARMSX3_PGO}"
+)
+
+target_compile_definitions(rpcsx-android PRIVATE
+    ARMSX3_BUILD_STAMP="${ARMSX3_BUILD_STAMP_TEXT}"
+)
+
+# Also on disk, so tools/fork/build.sh can put it in the build record without
+# scraping cmake's stdout -- which is not emitted at all on a warm build dir,
+# and build-variants.sh skips configure precisely to keep those fast.
+file(WRITE "${CMAKE_BINARY_DIR}/armsx3-build-stamp.txt" "${ARMSX3_BUILD_STAMP_TEXT}\n")
+
+message(STATUS "ARMSX3: build stamp -- ${ARMSX3_BUILD_STAMP_TEXT}")
+
+# Ask for a build id explicitly rather than relying on the NDK's default.
+#
+# tools/fork/build.sh proves the .so inside the APK is the one just linked by
+# comparing build ids: llvm-strip preserves .note.gnu.build-id, so the stripped
+# copy in jniLibs keeps the id the linker derived from the linked content. That
+# check is the only thing standing between a failed build and an APK that ships
+# the PREVIOUS core while reporting the new version, so whether the id exists
+# must not depend on a toolchain default that can change between NDK releases.
+target_link_options(rpcsx-android PRIVATE -Wl,--build-id=sha1)
