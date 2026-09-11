@@ -1793,6 +1793,18 @@ namespace vk
 		// Checks if linear BGRA8 images can be used for present
 		result.bgra8_linear = test_format_features(VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_FEATURE_BLIT_SRC_BIT, VK_TRUE);
 
+		// Reported because the fallback is invisible otherwise. D24_UNORM_S8_UINT is
+		// what CELL_GCM_TEXTURE_DEPTH24_D8 maps to when the device has it; without it
+		// every depth surface silently becomes D32_SFLOAT_S8_UINT, which is a different
+		// size and a different precision. That shows up as a bandwidth and memory
+		// difference between devices with no line anywhere saying why, and the memory
+		// heaps next to it are already reported for the same reason.
+		rsx_log.notice("Depth-stencil formats -- D24_UNORM_S8_UINT: %s, D32_SFLOAT_S8_UINT: %s%s",
+			result.d24_unorm_s8 ? "yes" : "NO",
+			result.d32_sfloat_s8 ? "yes" : "NO",
+			(g_cfg.video.force_high_precision_z_buffer && result.d32_sfloat_s8)
+				? " (D24 hidden by force high precision z buffer)" : "");
+
 		// Check if device supports RGBA8 format for rendering
 		if (!test_format_features(VK_FORMAT_R8G8B8A8_UNORM, required_colorbuffer_features, VK_FALSE))
 		{
