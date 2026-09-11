@@ -13,18 +13,39 @@ atribuídos — não medições próprias.
 
 ## Capacidades — a preencher (F1.1)
 
-`tools/fork/device-probe.sh` ainda não existe. Ele precisa registrar, com
-driver proprietário **e** Turnip:
+`tools/fork/device-probe.sh` existe. **Ninguém o rodou ainda**, porque exige o
+aparelho.
 
-- Extensões e features do Vulkan, limites, heaps de memória.
-- Formatos suportados, em especial **BC1–BC3** (se ausente, a Fase 5 precisa de
-  decode NEON ou compute shader) e **`D24_UNORM_S8_UINT`** (e qual é o fallback
-  quando falta).
-- Topologia de CPU: `cpu_capacity`, `scaling_max_freq`, `CPU part` por núcleo.
-  A topologia esperada é 1× X3 + 2× A715 + 2× A710 + 3× A510, **a confirmar**.
-- `HWCAP`/`HWCAP2`: `asimddp`, `i8mm`, `bf16`, `lse`, `crc32`, `sha3`, `sve`,
-  `sve2`. **Não assumir SVE/SVE2 exposto.**
-- Thermal zones, RAM total, `ro.build.version.sdk`.
+    tools/fork/device-probe.sh --label proprietary
+    # trocar o driver no app, abrir o app uma vez, entao:
+    tools/fork/device-probe.sh --label turnip-<versão>
+
+Cada execução grava `docs/fork/probe/<label>-<timestamp>.json`, versionado, e
+imprime um bloco para colar aqui. O JSON é o que `BASELINE.md` cita.
+
+**Rode uma vez por driver.** O script não troca o driver — isso é feito no app,
+via adrenotools — mas ele cruza o `--label` contra o driver que o log reporta e
+recusa a combinação quando discordam. Um log gerado antes da troca descreve o
+outro driver, e essa é a forma mais fácil de registrar uma medição contra o
+driver errado.
+
+Ele coleta topologia de CPU (`cpu_capacity`, `scaling_max_freq`, MIDR por
+núcleo), HWCAPs, thermal zones, RAM, versão do Android, modos de atualização do
+painel, e a metade Vulkan — GPU, identidade e versão do driver, extensões
+pedidas que faltam, BC1–BC3, D24/D32, float16 nativo e os heaps.
+
+Duas coisas a saber sobre o resultado:
+
+- **Núcleo offline aparece como offline, não some.** `/proc/cpuinfo` só lista
+  CPUs online e um núcleo parado não tem MIDR legível. Uma topologia registrada
+  com um núcleo fora não é parcial, é errada — o script marca e pede para
+  religar e repetir.
+- **A topologia esperada (1× X3 + 2× A715 + 2× A710 + 3× A510) não é assumida.**
+  O script reporta o que encontra e imprime o número de part cru; um part
+  desconhecido sai como `unknown`, não como palpite.
+
+Ainda **não** coletado: limites do device (`maxBoundDescriptorSets` e afins). O
+core não os enumera e nada precisou deles até agora.
 
 ## Quirks conhecidos
 
