@@ -124,3 +124,150 @@ não inicializado. Os três últimos saem com código 1.
   `android/configure.sh` (o README diz `RelWithDebInfo`, NDK r27 e API 31; o
   script real usa `Release`, NDK 29 e API 33). Só o bloco de clone foi corrigido
   aqui, para manter o commit atômico. O resto é F0.5.
+
+---
+
+## ADR-0002 — Identidade própria do app, para instalar lado a lado com o oficial
+
+**Data:** 2026-09-11
+**Status:** aceito
+**Fase:** 0 (bootstrap)
+
+### Contexto
+
+O gate de saída da Fase 0 é "APK do fork instalado lado a lado com o oficial e
+funcionalmente idêntico". Isso não é cosmético: **um A/B entre fork e upstream
+só é honesto se os dois estiverem instalados ao mesmo tempo, na mesma unidade,
+na mesma sessão térmica.** Medir o upstream hoje, desinstalar, instalar o fork e
+medir amanhã introduz temperatura, estado de bateria, versão de driver e cache
+de shader como variáveis não controladas — exatamente o que a seção 4 manda
+fixar.
+
+O upstream publica com `applicationId = com.armsx3` (flavor `github`) e
+`com.armsx3.play`. Um fork que mantivesse esses ids instalaria **por cima** do
+app oficial, não ao lado.
+
+### Decisão
+
+| Artefato | Upstream | Fork |
+|---|---|---|
+| `armsx3-ui`, flavor `github` | `com.armsx3` | `com.armsx3.amaral` |
+| `armsx3-ui`, flavor `play` | `com.armsx3.play` | `com.armsx3.amaral.play` |
+| `armsx3-app` (legado, não compilado) | `com.armsx3` | `com.armsx3.amaral.legacy` |
+| Rótulo do launcher | `ARMSX3` | `ARMSX3 Amaral` |
+
+O **pacote Java `com.armsx3`** (`NativeApp`, `Rpcs3Bridge`, `Rpcs3Settings`,
+`AssetUtil`) fica **intocado**. Esses nomes estão codificados nos símbolos JNI do
+core como `Java_com_armsx3_*`; renomeá-los desligaria todas as chamadas nativas.
+`applicationId` e pacote Java são coisas separadas — o próprio upstream já
+depende disso, mantendo `namespace = com.armsx2` enquanto publica como
+`com.armsx3`. O `namespace` também não foi tocado, pela razão que o upstream já
+registra: renomear 129 arquivos não compra nada.
+
+### Bloqueios de instalação lado a lado: auditados, nenhum encontrado
+
+Instalação paralela quebra quando dois APKs disputam um identificador global.
+Os manifestos foram auditados e estão limpos:
+
+- **Autoridade de `ContentProvider`** — a única é
+  `${applicationId}.updateprovider`, já interpolada. Se fosse literal, a segunda
+  instalação falharia com `INSTALL_FAILED_CONFLICTING_PROVIDER`.
+- **Permissões customizadas** — nenhuma declarada, então não há
+  `INSTALL_FAILED_DUPLICATE_PERMISSION`.
+- **Nomes de processo** — `android:process=":discord"` é relativo, portanto já
+  prefixado pelo pacote.
+- **Diretórios de dados** — derivados do `applicationId` pelo próprio Android.
+
+### Colisões reais encontradas e corrigidas
+
+O que não estava limpo eram três recursos **compartilhados fora** do sandbox:
+
+1. **`android/src/rpcsx-android.cpp`** lia
+   `/sdcard/Android/data/com.armsx3/files/driver_env.txt` com o pacote escrito
+   à mão. Esse arquivo é como se ajusta `TU_DEBUG` e outras opções do Mesa num
+   aparelho sem root. Com o literal, o fork leria o diretório **do app do
+   upstream**: um experimento de driver aplicado ao build errado, ou aos dois de
+   uma vez.
+
+   **Isto é um bug do upstream, não só um problema do fork** — o flavor `play`
+   (`com.armsx3.play`) já hoje lê o diretório do flavor `github`. Corrigido
+   derivando o pacote de `/proc/self/cmdline` e cortando em `:` (um processo
+   privado é `<pacote>:<nome>` e montaria um caminho inexistente). Candidato a
+   PR no upstream.
+
+2. **`Screenshots.kt`** publicava em `Pictures/ARMSX3`, álbum público
+   compartilhado. Como a regra 2 exige comparação de imagem em cena fixa como
+   gate de RSX, ter capturas dos dois builds intercaladas na mesma pasta com
+   nomes indistinguíveis inutiliza o gate. Agora o álbum vem de `app_name`.
+
+3. **`UpdaterEntry.kt`** consultava
+   `api.github.com/repos/ARMSX2/ARMSX3/releases`. O fork ofereceria APKs do
+   **upstream** — que, com `applicationId` diferente, não sobrescrevem nada:
+   instalam um **terceiro** app e deixam o testador sem saber qual build gerou
+   os números. Repontado para as releases do fork.
+
+   `pickApkAsset` não precisou mudar: ele casa por sufixo de nome de arquivo
+   (`-a13-armv8.2-sdk33` etc.), não por repositório, então continua correto
+   desde que o fork use o mesmo esquema de nomes de
+   `android/build-variants.sh`.
+
+### Efeitos colaterais que a mudança de id provocou e que foram corrigidos junto
+
+- **`android/build-play-aab.sh`** tem uma verificação *fail-closed* que casava
+  `com.armsx3.play` literal no manifesto compilado. Trocar o id sem tocar nela
+  faria toda build do bundle reprovar. Atualizada para
+  `com.armsx3.amaral.play`, mantida como literal de propósito: derivá-la do
+  mesmo gradle que ela verifica não verificaria nada.
+- **404 do updater.** O fork ainda não tem releases, e
+  `/releases/latest` num repositório sem releases responde 404, que
+  `conn.inputStream` lança como `FileNotFoundException` — indistinguível de
+  falha de rede, exibida ao usuário como "check failed". Agora o
+  `responseCode` é lido antes do stream e 404 vira "nada a oferecer".
+- **Links do projeto.** Com o fork virando um app instalável distinto, o botão
+  "GitHub" mandaria relatórios de bug do fork para o tracker do upstream, que
+  não consegue reproduzi-los. O botão da gaveta e o card "GitHub repository"
+  apontam para o fork; foi **acrescentado** um card "Upstream ARMSX3" acima do
+  card do RPCS3, de modo que a cadeia de atribuição fica visível e completa
+  (fork → ARMSX3 → RPCS3). Um fork GPL deve crédito visível aos seus upstreams,
+  não só o header de licença.
+- **Wordmark.** Fork e upstream compartilham o ícone, então na tela só o rótulo
+  do launcher os separava. `ArmsLogo` lê `app_name`, e a app rodando passa a
+  dizer qual build é — uma sessão de medição que confunde as duas produz
+  números para o binário errado.
+
+### Verificação
+
+Sem aparelho e sem SDK Android nesta sessão, o que foi verificado por execução:
+
+- A extração de pacote adicionada ao core foi compilada e testada isoladamente
+  em 8 casos: processo principal, `com.armsx3`, `com.armsx3.play`, sufixo
+  `:discord`, múltiplos `argv`, ausência de NUL final, cmdline vazio e arquivo
+  ausente.
+- `bash -n` nos scripts alterados.
+- A assinatura de `ProjectCard` foi conferida contra os argumentos nomeados
+  usados nos cards novos.
+- Um shadow introduzido em `Screenshots.kt` (uma `val album` local sobre a
+  função `album`) foi removido em vez de apostar na ordem de resolução do
+  Kotlin num arquivo que só compila no build Android.
+
+**Não verificado por build:** nada de Kotlin/Gradle/NDK foi compilado — não há
+SDK nesta sessão e o build oficial é o CI (F0.6). O gate desta fase continua
+dependendo de instalar os dois APKs no Odin 2.
+
+### Pendências deliberadas
+
+- **`News.kt`** continua lendo as releases do **upstream**. É um mural de notas
+  de release, texto puro, sem nenhum afordance de download (o comentário do
+  arquivo registra que isso é o que o mantém fora do flavor `github`). Para um
+  fork que acompanha o upstream, ver o que o upstream publicou é útil. Se algum
+  dia confundir o usuário, o conserto é mostrar as duas origens rotuladas, não
+  trocar de repositório.
+- **Tags de logcat** continuam `"ARMSX3"` nos dois builds, então filtrar por tag
+  durante um A/B mistura os dois. Não foi alterado porque são ~15 arquivos e a
+  mitigação já existe e é a prática normal: filtrar por PID
+  (`adb logcat --pid=$(adb shell pidof com.armsx3.amaral)`). A automação da
+  Fase 1 deve usar PID, nunca tag.
+- **`discord_bridge.cpp`** busca um asset em
+  `raw.githubusercontent.com/ARMSX2/ARMSX3/master/...`. É conteúdo, não
+  identidade, e o bridge do Discord depende de um SDK proprietário que este
+  fork não distribui. Fica para quando/se esse caminho for exercitado.

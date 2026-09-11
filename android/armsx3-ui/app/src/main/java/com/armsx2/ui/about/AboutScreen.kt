@@ -35,7 +35,14 @@ import com.armsx2.ui.common.ArmsTopBar
 import com.armsx2.ui.common.GlassPanel
 import com.armsx2.ui.common.RoundAction
 
-private const val RepositoryUrl = "https://github.com/ARMSX2/ARMSX3"
+// Three cards, in derivation order: this fork, the ARMSX3 port it forks, and the
+// RPCS3 emulator both descend from. The first has to be the fork -- it is the
+// only tracker that can act on a bug in THIS build, and pointing "GitHub
+// repository" at upstream sends fork bug reports to maintainers who cannot
+// reproduce them. The other two stay because a GPL fork owes its upstreams
+// visible credit, not just a licence header.
+private const val RepositoryUrl = "https://github.com/rickamaral94/Armadasx3-fork"
+private const val UpstreamRepositoryUrl = "https://github.com/ARMSX2/ARMSX3"
 private const val Rpcs3RepositoryUrl = "https://github.com/RPCS3/rpcs3"
 
 @Composable
@@ -108,10 +115,18 @@ fun AboutScreen(onBack: () -> Unit, viewModel: AboutViewModel = viewModel()) {
                     if (compact) {
                         ProjectCard(
                             title = str("about.repository.title"),
-                            repository = "ARMSX2/ARMSX3",
+                            repository = "rickamaral94/Armadasx3-fork",
                             description = str("about.repository.description"),
                             glyph = "⌘",
                             onOpen = { uriHandler.openUri(RepositoryUrl) },
+                        )
+                        ProjectCard(
+                            title = str("about.upstream.title"),
+                            repository = "ARMSX2/ARMSX3",
+                            description = str("about.upstream.description"),
+                            glyph = "↑",
+                            secondary = true,
+                            onOpen = { uriHandler.openUri(UpstreamRepositoryUrl) },
                         )
                         ProjectCard(
                             title = str("about.rpcs3.title"),
@@ -125,11 +140,20 @@ fun AboutScreen(onBack: () -> Unit, viewModel: AboutViewModel = viewModel()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ProjectCard(
                                 title = str("about.repository.title"),
-                                repository = "ARMSX2/ARMSX3",
+                                repository = "rickamaral94/Armadasx3-fork",
                                 description = str("about.repository.description"),
                                 glyph = "⌘",
                                 modifier = Modifier.weight(1f),
                                 onOpen = { uriHandler.openUri(RepositoryUrl) },
+                            )
+                            ProjectCard(
+                                title = str("about.upstream.title"),
+                                repository = "ARMSX2/ARMSX3",
+                                description = str("about.upstream.description"),
+                                glyph = "↑",
+                                modifier = Modifier.weight(1f),
+                                secondary = true,
+                                onOpen = { uriHandler.openUri(UpstreamRepositoryUrl) },
                             )
                             ProjectCard(
                                 title = str("about.rpcs3.title"),

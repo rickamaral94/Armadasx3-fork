@@ -71,8 +71,18 @@ import java.util.TimeZone
  * ahead of any stable, so those are short-circuited rather than being offered a downgrade.
  */
 
-private const val LATEST_URL = "https://api.github.com/repos/ARMSX2/ARMSX3/releases/latest"
-private const val RELEASES_URL = "https://api.github.com/repos/ARMSX2/ARMSX3/releases?per_page=20"
+// The FORK's releases, not ARMSX2/ARMSX3.
+//
+// Pointing this at upstream would have the fork offer to install upstream
+// builds. Since the fork's applicationId differs, that does not overwrite
+// anything -- it quietly puts a THIRD app on the device, and leaves the tester
+// unsure which build produced the numbers they just recorded. A fork whose
+// updater installs upstream cannot be A/B'd against upstream at all.
+//
+// Until the fork cuts its first release these return 404, which is handled as
+// "nothing to offer" rather than as a failure (see httpGet).
+private const val LATEST_URL = "https://api.github.com/repos/rickamaral94/Armadasx3-fork/releases/latest"
+private const val RELEASES_URL = "https://api.github.com/repos/rickamaral94/Armadasx3-fork/releases?per_page=20"
 private const val NIGHTLY_VC_THRESHOLD = 1_000_000  // stable VCs are ~1300; nightly = Unix seconds.
 
 private sealed interface UpdateState {
@@ -314,6 +324,9 @@ private suspend fun checkForUpdate(includeNightly: Boolean, checkFailedPrefix: S
             if (newer) return@withContext UpdateState.Available(tag, rel.optString("body", ""), apkUrl)
         }
         UpdateState.UpToDate
+    } catch (e: NoReleasesException) {
+        // Nothing published yet. Not an error the user can act on.
+        UpdateState.UpToDate
     } catch (e: Exception) {
         UpdateState.Error("$checkFailedPrefix: ${e.message}")
     }
@@ -421,13 +434,24 @@ private fun isNewer(remoteTag: String, installed: String): Boolean {
     return false
 }
 
+/** Thrown when the release endpoint says there is nothing published yet. */
+private class NoReleasesException : Exception()
+
 private fun httpGet(url: String): String {
     val conn = URL(url).openConnection() as HttpURLConnection
     return try {
         conn.connectTimeout = 10_000
         conn.readTimeout = 15_000
         conn.setRequestProperty("Accept", "application/vnd.github+json")
-        conn.setRequestProperty("User-Agent", "ARMSX3-Updater")
+        conn.setRequestProperty("User-Agent", "ARMSX3-Amaral-Updater")
+
+        // A repository with no releases answers /releases/latest with 404, and
+        // conn.inputStream throws FileNotFoundException for it -- indistinguishable
+        // from a real failure, so the user saw "check failed" and read it as a bug.
+        // Reading responseCode first separates the two. It is checked before the
+        // stream because touching inputStream is what throws.
+        if (conn.responseCode == HttpURLConnection.HTTP_NOT_FOUND) throw NoReleasesException()
+
         conn.inputStream.bufferedReader().use { it.readText() }
     } finally {
         conn.disconnect()

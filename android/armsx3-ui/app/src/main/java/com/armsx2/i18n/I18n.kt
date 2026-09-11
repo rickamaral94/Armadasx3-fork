@@ -192,6 +192,8 @@ val EN: Map<String, String> = mapOf(
     "about.androidVersion" to "Android version",
     "about.repository.title" to "GitHub repository",
     "about.repository.description" to "Open the source code, releases, and issue tracker.",
+    "about.upstream.title" to "Upstream ARMSX3",
+    "about.upstream.description" to "The Android port this build is forked from.",
     "about.build.title" to "Build information",
     "about.hardware.title" to "Device information",
     "about.soc" to "Chipset",
