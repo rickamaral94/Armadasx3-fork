@@ -9,7 +9,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-: "${ANDROID_HOME:=$HOME/Library/Android/sdk}"
+# shellcheck source=android/host-tools.sh
+. "$ROOT/android/host-tools.sh"
+if [ -z "${ANDROID_HOME:-}" ]; then
+	ANDROID_HOME="$(armsx3_default_android_home)" || exit 1
+fi
 # NDK 29 (clang 21), NOT NDK 28.2 (clang 19.0.1).
 # Upstream's stated floor is clang-19 and 28.2 sits exactly on it, but clang
 # 19.0.1 mis-analyses fmt::throw_exception -- that is a CTAD struct whose

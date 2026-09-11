@@ -22,22 +22,19 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UI="$HERE/armsx3-ui"
 : "${OUT_DIR:=$HOME/Downloads}"
-: "${ANDROID_HOME:=$HOME/Library/Android/sdk}"
+# shellcheck source=android/host-tools.sh
+. "$HERE/host-tools.sh"
+if [ -z "${ANDROID_HOME:-}" ]; then
+	ANDROID_HOME="$(armsx3_default_android_home)" || exit 1
+fi
 
 MIN_SDK="${PLAY_MIN_SDK:-30}"
 
 # Gradle needs a JDK and the shell this is run from may not have one on PATH. Android Studio
 # ships one; fall back to it rather than failing several steps later with "Unable to locate a
 # Java Runtime", which does not point at the cause.
-if [ -z "${JAVA_HOME:-}" ]; then
-	for candidate in \
-		"/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
-		"$(/usr/libexec/java_home 2>/dev/null || true)"
-	do
-		[ -x "$candidate/bin/java" ] && { export JAVA_HOME="$candidate"; break; }
-	done
-fi
-[ -n "${JAVA_HOME:-}" ] || { echo "FAIL: no JDK found; set JAVA_HOME" >&2; exit 1; }
+JAVA_HOME="$(armsx3_default_java_home)" || { echo "FAIL: no JDK found; set JAVA_HOME" >&2; exit 1; }
+export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
 
 # Refuse to build at all without an upload key. A debug-signed bundle is rejected by Play, and
@@ -85,8 +82,8 @@ if [ ! -f "$CORE_SRC" ]; then
 fi
 
 NDK_DIR="$(ls -d "$ANDROID_HOME/ndk/"*/ 2>/dev/null | sort -V | tail -1)"
-STRIP="${NDK_DIR}toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip"
-[ -x "$STRIP" ] || { echo "FAIL: llvm-strip not found under $ANDROID_HOME/ndk" >&2; exit 1; }
+NDK_BIN="$(armsx3_ndk_bin "$NDK_DIR")" || { echo "FAIL: no NDK toolchain under $ANDROID_HOME/ndk" >&2; exit 1; }
+STRIP="$NDK_BIN/llvm-strip"
 
 # Same reason as build-variants.sh: cmake only regenerates this at configure time.
 bash "$HERE/stamp-git-version.sh"

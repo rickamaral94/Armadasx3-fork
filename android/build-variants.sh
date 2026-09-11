@@ -58,8 +58,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-: "${ANDROID_HOME:=$HOME/Library/Android/sdk}"
-: "${JAVA_HOME:=/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
+# shellcheck source=android/host-tools.sh
+. "$ROOT/android/host-tools.sh"
+if [ -z "${ANDROID_HOME:-}" ]; then
+	ANDROID_HOME="$(armsx3_default_android_home)" || exit 1
+fi
+JAVA_HOME="$(armsx3_default_java_home)" || exit 1
 : "${CMAKE_VERSION:=3.30.5}"
 : "${OUT_DIR:=$HOME/Downloads}"
 export ANDROID_HOME JAVA_HOME
@@ -151,7 +155,9 @@ build_variant() {
 	# for it: name it here or ship an APK with frame generation silently missing.
 	PATH="$CMAKE_BIN:$PATH" ninja -C "$build_dir" android/libarmsx3-core.so armsx3_lsfg
 
-	local strip="$ANDROID_HOME/ndk/$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip"
+	local ndk_bin
+	ndk_bin="$(armsx3_ndk_bin "$ANDROID_HOME/ndk/$ndk")" || return 1
+	local strip="$ndk_bin/llvm-strip"
 
 	"$strip" --strip-unneeded -o "$JNI_LIBS/libarmsx3-core.so" \
 		"$build_dir/android/libarmsx3-core.so"
@@ -166,7 +172,7 @@ build_variant() {
 		# Only the shim's own entry points may be dynamic: a single leaked vk* symbol means the
 		# dynamic linker can bind the renderer's Vulkan calls to framegen's copies.
 		local leaked
-		leaked=$("$ANDROID_HOME/ndk/$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm" \
+		leaked=$("$ndk_bin/llvm-nm" \
 			-D --defined-only "$JNI_LIBS_GITHUB/libarmsx3_lsfg.so" 2>/dev/null | grep -cE "vk[A-Z]|LSFG" || true)
 
 		if [[ "$leaked" != "0" ]]; then
