@@ -3324,9 +3324,34 @@ extern "C" bool _rpcsx_initialize(std::string_view rootDir,
   // which is what makes a driver experiment possible on a device that is not rooted.
   std::string env_path = g_android_executable_dir + "driver_env.txt";
   if (!fs::is_file(env_path)) {
-    if (const std::string ext = "/sdcard/Android/data/com.armsx3/files/driver_env.txt";
-        fs::is_file(ext)) {
-      env_path = ext;
+    // The package name has to come from the running process, not a literal.
+    //
+    // It used to be spelled "com.armsx3" here, which is only the applicationId of
+    // the github build. The play flavor installs as com.armsx3.play and any fork
+    // installs as something else again, and each of those was reading the github
+    // build's directory: a file that belongs to another app, absent on a device
+    // that never had that app, and silently shared where both are installed. A
+    // driver experiment then applies to the wrong build, or to both at once,
+    // which is precisely the confusion this file exists to remove.
+    //
+    // /proc/self/cmdline is the package name for the main process, which is the
+    // only process the core runs in. Trim at ':' anyway -- a private process is
+    // spelled "<package>:<name>" and would otherwise build a path that cannot
+    // exist.
+    std::string pkg;
+    if (std::ifstream cmdline("/proc/self/cmdline"); cmdline.is_open()) {
+      std::getline(cmdline, pkg, '\0');
+
+      if (const auto colon = pkg.find(':'); colon != std::string::npos) {
+        pkg.resize(colon);
+      }
+    }
+
+    if (!pkg.empty()) {
+      if (const std::string ext = "/sdcard/Android/data/" + pkg + "/files/driver_env.txt";
+          fs::is_file(ext)) {
+        env_path = ext;
+      }
     }
   }
 
