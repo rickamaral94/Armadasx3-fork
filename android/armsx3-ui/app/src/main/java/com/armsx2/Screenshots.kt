@@ -17,7 +17,17 @@ import java.io.File
  * the button, sees "Saved screenshot to …" and then cannot find the file anywhere.
  */
 object Screenshots {
-    private const val ALBUM = "ARMSX3"
+    /**
+     * Gallery album, taken from the launcher label rather than hardcoded.
+     *
+     * Pictures/ is shared across apps, so a literal "ARMSX3" put this fork's
+     * captures in the same album as upstream's. That is not cosmetic here: the
+     * RSX correctness gate compares screenshots of a fixed scene between the two
+     * builds, and it cannot do that if the two builds' output is interleaved in
+     * one folder under indistinguishable names. Reading app_name keeps the album
+     * matching whatever the build is actually called.
+     */
+    private fun album(context: Context) = context.getString(R.string.app_name)
 
     /** Fire-and-forget: queues the capture on the GS thread, then publishes it once it lands. */
     fun capture(context: Context) {
@@ -50,14 +60,17 @@ object Screenshots {
         }
     }
 
-    /** Copy [png] into Pictures/ARMSX2 so it shows up in the gallery. */
+    /** Copy [png] into Pictures/<app_name> so it shows up in the gallery. */
     private fun publish(context: Context, png: File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // MediaStore owns the file; no storage permission needed on Q+.
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, png.name)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/$ALBUM")
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_PICTURES}/${album(context)}",
+                )
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
@@ -68,12 +81,12 @@ object Screenshots {
             resolver.update(uri, values, null, null)
         } else {
             // Pre-Q: a plain file write, then tell the media scanner it exists.
-            val album = File(
+            val albumDir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                ALBUM,
+                album(context),
             )
-            album.mkdirs()
-            val dest = File(album, png.name)
+            albumDir.mkdirs()
+            val dest = File(albumDir, png.name)
             png.inputStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
             @Suppress("DEPRECATION")
             android.media.MediaScannerConnection.scanFile(

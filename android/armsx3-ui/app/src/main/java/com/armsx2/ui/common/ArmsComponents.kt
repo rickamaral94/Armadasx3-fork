@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -115,18 +116,24 @@ fun ArmsBackdrop(
 
 @Composable
 fun ArmsLogo(modifier: Modifier = Modifier, showWordmark: Boolean = true, iconSize: Dp = 42.dp) {
+    // From app_name rather than a literal, so the running app says which build it
+    // is. The fork and upstream install side by side and share this artwork, so on
+    // screen they were telling apart only by the launcher label -- and a
+    // measurement session that confuses the two produces numbers for the wrong
+    // binary.
+    val appName = stringResource(id = R.string.app_name)
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         // The ARMSX3 mark, circle-cropped so its dark square corners don't show —
         // matches the round hero render.
         Image(
             painter = painterResource(id = R.drawable.ic_armsx3_mark),
-            contentDescription = "ARMSX3",
+            contentDescription = appName,
             modifier = Modifier.size(iconSize).clip(CircleShape),
         )
         if (showWordmark) {
             Spacer(Modifier.width(12.dp))
             Text(
-                text = "ARMSX3",
+                text = appName,
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,

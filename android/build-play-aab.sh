@@ -159,10 +159,15 @@ else
 fi
 
 # And the things that MUST be there.
-if LC_ALL=C grep -aqF "com.armsx3.play" "$MANIFEST"; then
-	echo "  ok: applicationId is com.armsx3.play"
+# Fork: com.armsx3.amaral.play, not upstream's com.armsx3.play. Kept as a literal
+# rather than read from gradle because the point of this check is that the two
+# agree -- deriving it from the same file it is verifying would check nothing.
+PLAY_APP_ID="com.armsx3.amaral.play"
+
+if LC_ALL=C grep -aqF "$PLAY_APP_ID" "$MANIFEST"; then
+	echo "  ok: applicationId is $PLAY_APP_ID"
 else
-	echo "FAIL: applicationId com.armsx3.play not in the manifest -- wrong flavor built?" >&2
+	echo "FAIL: applicationId $PLAY_APP_ID not in the manifest -- wrong flavor built?" >&2
 	fail=1
 fi
 

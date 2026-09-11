@@ -28,7 +28,18 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.armsx3"
+        // Fork: com.armsx3.amaral, NOT upstream's com.armsx3. The two have to
+        // install side by side on the same device, because an A/B between fork
+        // and upstream is only honest when both are installed at once and
+        // measured on the same unit in the same session.
+        //
+        // The JAVA package com.armsx3 (NativeApp, Rpcs3Bridge, Rpcs3Settings,
+        // AssetUtil) is deliberately untouched: those names are encoded in the
+        // core's JNI symbols as Java_com_armsx3_*, and renaming them would
+        // unbind every native call. applicationId and Java package are separate
+        // things -- upstream already relies on that, keeping namespace at
+        // com.armsx2 while shipping as com.armsx3.
+        applicationId = "com.armsx3.amaral"
         // Set per variant by android/build-variants.sh: 33 for the A13 build (NDK 28), 35 for
         // the A15 build (NDK 29). The core is compiled against the matching API, so these must
         // agree -- an APK that installs below its core's target is a dlopen failure at boot.
@@ -89,7 +100,9 @@ android {
 
         create("play") {
             dimension = "distribution"
-            applicationId = "com.armsx3.play"
+            // Kept distinct from upstream's com.armsx3.play for the same reason
+            // as above, even though this fork has no reason to publish to Play.
+            applicationId = "com.armsx3.amaral.play"
 
             buildConfigField("boolean", "STORAGE_ALL_FILES", "false")
             buildConfigField("boolean", "IN_APP_UPDATER", "false")
