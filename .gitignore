@@ -155,12 +155,12 @@ android/**/keystore.properties
 # Secrets kept out of source (see RA user-agent handling)
 **/ra_ua_secret.h
 
-# Third party checkouts. Not submodules, clone these yourself before building.
-#   librashader  https://github.com/SnowflakePowered/librashader
-#   libadrenotools  https://github.com/bylaws/libadrenotools
-3rdparty/librashader/
+# librashader and libadrenotools are submodules in this fork, so they are NOT
+# ignored -- see .gitmodules and tools/fork/check-deps.sh. android/armsx3-app is
+# the legacy app module that build-variants.sh does not build; its own manual
+# libadrenotools checkout stays ignored.
 android/app-upstream/
-android/**/cpp/libadrenotools/
+android/armsx3-app/app/src/main/cpp/libadrenotools/
 
 # Kotlin incremental-compile scratch dir
 android/armsx3-ui/.kotlin/

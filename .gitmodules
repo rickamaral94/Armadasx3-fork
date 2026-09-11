@@ -115,3 +115,11 @@
 [submodule "3rdparty/oboe/oboe"]
 	path = 3rdparty/oboe/oboe
 	url = https://github.com/google/oboe.git
+[submodule "3rdparty/librashader"]
+	path = 3rdparty/librashader
+	url = ../../SnowflakePowered/librashader.git
+	ignore = dirty
+[submodule "android/armsx3-ui/app/src/main/cpp/libadrenotools"]
+	path = android/armsx3-ui/app/src/main/cpp/libadrenotools
+	url = ../../bylaws/libadrenotools.git
+	ignore = dirty

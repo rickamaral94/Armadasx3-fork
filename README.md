@@ -10,13 +10,18 @@ Building
  arm64-v8a and armv8.2 is supported. You need the Android SDK with NDK r27 or newer,
 CMake 3.30 or newer, and a JDK 17. Android Studio ships all of these.
 
-Clone with submodules, then fetch the two third party checkouts that are not
-submodules:
+Clone with submodules. In this fork librashader and libadrenotools are
+submodules too, so there is nothing to fetch by hand:
 
-    git clone --recursive https://github.com/ARMSX2/ARMSX3.git
-    cd ARMSX3
-    git clone https://github.com/SnowflakePowered/librashader 3rdparty/librashader
-    git clone https://github.com/bylaws/libadrenotools android/armsx3-ui/app/src/main/cpp/libadrenotools
+    git clone --recursive https://github.com/rickamaral94/Armadasx3-fork.git
+    cd Armadasx3-fork
+
+Upstream ARMSX3 leaves those two as manual checkouts, which means the version
+you build against depends on the day you cloned. Pinning them is what makes an
+A/B measurement mean anything -- see docs/fork/DECISIONS.md. To confirm your
+tree matches the pins before a measured build:
+
+    tools/fork/check-deps.sh
 
 Build the core. This is the long part and produces an unstripped library of
 around 1.3 GB:
