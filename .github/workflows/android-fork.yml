@@ -1,0 +1,170 @@
+# CI for the fork's Android build.
+#
+# Two jobs on purpose, because their costs differ by three orders of magnitude.
+#
+# `checks` runs on every push and pull request and finishes in a couple of
+# minutes. It catches the regressions a build does NOT catch -- an APK carrying
+# upstream's applicationId compiles and installs perfectly, it just installs
+# over the official app instead of beside it and silently destroys the ability
+# to A/B the two.
+#
+# `core` is a full LLVM + RPCS3 build. It is manual (workflow_dispatch) and on
+# tags only. Running it per push would spend hours of runner time per commit for
+# no added signal, since nothing in the fork's early phases changes the core's
+# ability to compile more often than a person can ask.
+#
+# NOTE on the inherited workflows: rpcs3.yml triggers on `pull_request` for ANY
+# branch and builds desktop RPCS3 across five platforms. Opening a PR on this
+# fork starts that. It has not been touched here -- silently disabling upstream
+# CI is not this workflow's call -- but it is worth knowing before opening one.
+name: Android (fork)
+
+on:
+  push:
+    branches: [main, 'claude/**', 'feat/**', 'sync/**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: 'Variants to build (space separated: legacy a11 a13 a15)'
+        default: 'a13'
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Fork checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The two fork pins only. A recursive checkout here would pull LLVM
+          # for a job that never compiles anything.
+          submodules: false
+
+      - name: Fetch the fork's pinned submodules
+        run: |
+          git submodule update --init \
+            3rdparty/librashader \
+            android/armsx3-ui/app/src/main/cpp/libadrenotools
+
+      - name: Dependency pins
+        run: tools/fork/check-deps.sh
+
+      - name: Fork identity and build portability
+        run: tools/fork/check-identity.sh
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # The fork's own scripts, plus the upstream ones it modified.
+          shellcheck -S warning \
+            tools/fork/build.sh \
+            tools/fork/check-deps.sh \
+            tools/fork/check-identity.sh \
+            android/host-tools.sh \
+            android/configure.sh \
+            android/build-variants.sh \
+            android/build-play-aab.sh \
+            android/stamp-git-version.sh
+
+  core:
+    name: Core + APK
+    # Tags and manual runs only -- see the header.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350   # the hard ceiling is 360; fail before the runner is killed
+    steps:
+      # The default runner has roughly 21 GB free. A cold build is the LLVM
+      # source tree, LLVM objects, RPCS3 objects and a ~1.3 GB unstripped core,
+      # which does not fit. Removing the preinstalled toolchains this job never
+      # uses returns around 25 GB.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+                      /usr/share/swift "${AGENT_TOOLSDIRECTORY:-}" || true
+          # NOT /usr/local/lib/android: that is ANDROID_HOME on this runner and
+          # the next step calls its sdkmanager. Only the preinstalled NDKs go,
+          # which is where its size is; the one this build needs is installed
+          # fresh below.
+          sudo rm -rf "$ANDROID_HOME"/ndk/* || true
+          sudo apt-get clean
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          # Full history for the superproject because stamp-git-version.sh builds
+          # the version from `git rev-list HEAD --count`, which reads 1 on a
+          # shallow clone and would stamp every build as commit number one.
+          fetch-depth: 0
+          # Submodules are fetched separately, shallow. Recursive here would pull
+          # the ENTIRE llvm-project history, which the build never reads.
+          submodules: false
+
+      - name: Fetch submodules (shallow)
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install NDK and CMake
+        run: |
+          set -euo pipefail
+          # NDK 29 specifically: clang 19 (NDK 28) does not compile this tree.
+          # android/configure.sh records why, and pins the same versions.
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'ndk;29.0.14206865' 'cmake;3.30.5' >/dev/null
+          ls "$ANDROID_HOME/ndk"
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: android-core-${{ github.ref_name }}
+          max-size: 4G
+
+      - name: Build
+        env:
+          OUT_DIR: ${{ github.workspace }}/out
+          # CMake initialises CMAKE_<LANG>_COMPILER_LAUNCHER from the environment
+          # variable of the same name. That is the only way in: build.sh does not
+          # forward cmake arguments, and configure.sh sets no launcher, so without
+          # these the ccache step above would cache nothing and every run would be
+          # a cold build.
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          mkdir -p "$OUT_DIR"
+          tools/fork/build.sh ${{ github.event.inputs.variants || 'a13' }}
+
+      - name: Disk after build
+        if: always()
+        run: df -h /
+
+      - name: Upload APK and build record
+        uses: actions/upload-artifact@v4
+        with:
+          name: armsx3-amaral-apk
+          path: |
+            out/*.apk
+            out/build-record-*.json
+          if-no-files-found: error
+
+      # Kept because a crash from a release build is unreadable without it: the
+      # shipped core is stripped, and the symbols only exist in this file. It is
+      # large, so it expires sooner than the APK.
+      - name: Upload unstripped core for symbolication
+        uses: actions/upload-artifact@v4
+        with:
+          name: armsx3-amaral-core-unstripped
+          path: build-*/android/libarmsx3-core.so
+          retention-days: 14
+          if-no-files-found: error
