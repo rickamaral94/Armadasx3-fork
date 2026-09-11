@@ -1,14 +1,26 @@
-ARMSX3
-======
+ARMSX3 Amaral
+=============
 
-Uses the latest RPCS3 upstream code (the recent ARM64 improvements included). 
+A fork of [ARMSX3](https://github.com/ARMSX2/ARMSX3) -- itself an Android port
+of [RPCS3](https://github.com/RPCS3/rpcs3) -- tuned for one target: the
+Qualcomm QCS8550 / Adreno 740 in the AYN Odin 2 Portal.
+
+Everything here is driven by measurement. A change ships when it is backed by
+numbers on that device, passes the PPU/SPU instruction suite without new
+divergences, and does not regress the game matrix. See `docs/fork/` for the
+baseline, the per-change log, and the decision records.
+
+It installs as `com.armsx3.amaral`, alongside upstream rather than over it, so
+the two can be compared on the same unit in the same session.
 
 
 Building
 --------
 
- arm64-v8a and armv8.2 is supported. You need the Android SDK with NDK r27 or newer,
-CMake 3.30 or newer, and a JDK 17. Android Studio ships all of these.
+arm64-v8a only. You need the Android SDK with NDK 29, CMake 3.30.5 and a JDK 17
+or newer; Android Studio ships all of them. NDK 29 is not a floor to round down
+from -- clang 19 (NDK 28) miscompiles this tree, and `android/configure.sh`
+records why.
 
 Clone with submodules. In this fork librashader and libadrenotools are
 submodules too, so there is nothing to fetch by hand:
@@ -23,32 +35,34 @@ tree matches the pins before a measured build:
 
     tools/fork/check-deps.sh
 
-Build the core. This is the long part and produces an unstripped library of
-around 1.3 GB:
+Then build:
 
-    export ANDROID_HOME=$HOME/Library/Android/sdk
-    cmake -B build-android -G Ninja \
-      -DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/<version>/build/cmake/android.toolchain.cmake \
-      -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-31 \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo
-    cmake --build build-android --target rpcsx-android -j8
+    tools/fork/build.sh a13
 
-Strip it and put it where the app expects it:
+That is the whole thing: it checks the dependency pins, refreshes the version
+stamp, builds the core, strips it, packages the APK, and writes a JSON build
+record next to it. The first build is long -- it compiles LLVM -- and the
+unstripped core is around 1.3 GB.
 
-    llvm-strip --strip-unneeded build-android/android/libarmsx3-core.so
-    cp build-android/android/libarmsx3-core.so \
-       android/armsx3-ui/app/src/main/jniLibs/arm64-v8a/
+`ANDROID_HOME` and `JAVA_HOME` are found automatically when unset. Set them if
+you have several.
 
-Then build the app:
+Variants are `legacy`, `a11`, `a13` and `a15`; they differ in platform level and
+ISA baseline, not in speed, and a device should install the highest it can run.
+`android/build-variants.sh` documents the split.
 
-    cd android/armsx3-ui
-    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-    ./gradlew :app:assembleRelease
+**Gradle does not build the core.** It packages whatever sits in
+`jniLibs/arm64-v8a/`, so a build that failed, or a variant whose ninja step was
+skipped, leaves the previous core there and Gradle ships it -- a new-looking APK
+reporting a new version and running old code, with no symptom. `build.sh`
+refuses to finish when that happens: it compares the GNU build id of the freshly
+linked core against the one it packaged. Use it rather than driving cmake and
+gradle by hand, and if you do drive them by hand, check that yourself.
 
-The apk lands in app/build/outputs/apk/release/.
-
-Note that the core library has to be rebuilt and copied again whenever anything
-under rpcs3/ or android/src/ changes. Gradle does not build it for you.
+Every binary carries how it was built, not just which commit it came from. The
+log's first line is the commit plus `type=`, `march=`, `api=`, `abi=`, `lto=`
+and `pgo=`, because the shipped variants differ only in the last of those and
+two logs from one commit can otherwise describe different code.
 
 The Discord Social SDK is proprietary and is not redistributed here. Get it from
 Discord's developer portal and drop it in app/libs/ and
@@ -62,4 +76,5 @@ License
 GPL-2.0-only, the same as RPCS3. See LICENSE. Some files may be licensed
 differently, check the file headers.
 
+Forked from ARMSX3, https://github.com/ARMSX2/ARMSX3
 Based on RPCS3, https://github.com/RPCS3/rpcs3
