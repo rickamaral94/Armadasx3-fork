@@ -311,6 +311,13 @@ val EN: Map<String, String> = mapOf(
     "app.backup.exported" to "Backup saved — %s.",
     "app.backup.imported" to "Restored %s. Restarting…",
     "app.backup.failed" to "Backup failed: %s",
+
+    // Fork: on-device diagnostics export. See ForkDiagnostics.
+    "app.diag.export" to "Export diagnostics",
+    "app.diag.export.desc" to "Emulator log, crash dumps and a device report in one .zip, to send for analysis. Contains no game data and no personal files.",
+    "app.diag.working" to "Collecting…",
+    "app.diag.exported" to "Diagnostics saved — %s.",
+    "app.diag.failed" to "Export failed: %s",
     "app.savedata.import" to "Import save data",
     "app.savedata.import.desc" to "Add a PS3 save or roster from a .zip. Android blocks other apps from writing into the emulator's folder, so files have to be brought in from here.",
     "app.savedata.importFolder" to "Import save data folder",

@@ -181,10 +181,29 @@ interceptando e sanitizando `CTR_EL0` em sistemas com linhas divergentes, e a
 implementação de `__clear_cache` varia entre libgcc e compiler-rt. A pergunta é
 empírica, não teórica: **as linhas de cache do QCS8550 divergem entre núcleos?**
 
-`tools/fork/device-probe.sh` agora responde isso. Ele lê
-`/sys/devices/system/cpu/cpu*/cache/index*/coherency_line_size` por núcleo e diz
-"Uniform" ou "DIFFERENT". Se vier uniforme, este quirk fecha sem trabalho
-nenhum. Se vier divergente, a abordagem do Dolphin vira candidata.
+**A medição precisa de duas leituras, não de uma.** O `device-probe.sh` lê
+`/sys/devices/system/cpu/cpu*/cache/index*/coherency_line_size`, que é a resposta
+do *hardware*. Mas o que o JIT pode agir sobre é o que o `CTR_EL0` devolve **em
+EL0**, e é exatamente aí que o kernel intervém: quando os núcleos divergem, o
+`ARM64_MISMATCHED_CACHE_TYPE` faz o Linux interceptar a leitura e devolver um
+valor sanitizado. Só o sysfs não distingue "o hardware é uniforme" de "o hardware
+diverge e o kernel esconde" — e essas duas situações levam à mesma decisão,
+enquanto a terceira ("diverge e o kernel não esconde") leva à oposta.
+
+A exportação de diagnóstico do app (`ForkDiagnostics` → `cpp/fork_diag.cpp`) faz
+as duas leituras, com o `CTR_EL0` lido **fixado em cada núcleo** via
+`sched_setaffinity`, e imprime uma linha `verdict:`. A tabela de decisão:
+
+| sysfs | CTR_EL0 em EL0 | Conclusão |
+|---|---|---|
+| uniforme | uniforme | Q6 fecha; `__builtin___clear_cache` está seguro aqui |
+| **diverge** | uniforme | o kernel sanitiza; Q6 fecha, e o motivo fica registrado |
+| diverge | **diverge** | exposto; a abordagem do Dolphin vira candidata |
+| qualquer | ilegível | inconclusivo — nem fechar nem agir |
+
+Um núcleo pode sair como "unreachable": o Android confina o cpuset de um app em
+segundo plano, então a exportação deve ser feita com o app em primeiro plano, e o
+relatório diz quais núcleos não puderam ser lidos em vez de omiti-los.
 
 Detalhe correlato que **não** se aplica aqui: o Dolphin usa `dc civac` em vez de
 `dc cvau` como contorno das erratas 819472/826319/827319/824069 do Cortex-A53.

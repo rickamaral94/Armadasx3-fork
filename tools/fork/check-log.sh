@@ -12,6 +12,7 @@
 #
 # Usage:
 #   tools/fork/check-log.sh <ARMSX3.log>
+#   tools/fork/check-log.sh <diag.zip>        # the app's "Export diagnostics" zip
 #   tools/fork/check-log.sh --pull            # fetch it off the device first
 #
 # Exit: 0 the log is usable for both phases; 1 something needed is missing.
@@ -45,6 +46,36 @@ else
 	LOG="${1:-}"
 	[ -n "$LOG" ] || { sed -n '2,20p' "$0"; exit 2; }
 	[ -f "$LOG" ] || { echo "no such file: $LOG" >&2; exit 1; }
+
+	# The app's on-device export (ForkDiagnostics) is a zip, and it is now the
+	# normal way a log arrives -- adb needs a PC, and Android/data is unreachable
+	# from a file manager. Accept it directly rather than making everyone unzip
+	# by hand and then find the right member.
+	case "$LOG" in
+	*.zip)
+		command -v unzip >/dev/null 2>&1 || {
+			echo "need unzip to read $LOG" >&2; exit 1; }
+
+		zipfile="$LOG"
+		LOG="$(mktemp -t armsx3-log.XXXXXX)"
+		unzip -p "$zipfile" ARMSX3.log > "$LOG" 2>/dev/null || true
+		[ -s "$LOG" ] || {
+			echo "no ARMSX3.log inside $zipfile" >&2
+			echo "members:" >&2
+			unzip -l "$zipfile" >&2
+			exit 1
+		}
+		echo "read ARMSX3.log out of $zipfile"
+
+		# device.txt is the half check-log.sh cannot judge -- it is the probe's
+		# job -- but printing the verdict line here means one command answers
+		# the question the cache-line experiment was set up to ask.
+		if verdict="$(unzip -p "$zipfile" device.txt 2>/dev/null | grep -E '^verdict:')"; then
+			[ -n "$verdict" ] && echo "device.txt says: $verdict"
+		fi
+		echo
+		;;
+	esac
 fi
 
 missing=0

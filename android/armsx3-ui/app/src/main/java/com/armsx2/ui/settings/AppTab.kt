@@ -580,6 +580,8 @@ fun AppTab() {
 
         BackupRestoreRows()
 
+        DiagnosticsExportRow()
+
         ToggleRow(
             label = str("app.blockHome"),
             value = com.armsx2.ui.ScreenPinning.enabled.value,
@@ -1196,6 +1198,55 @@ private fun BackupRestoreRows() {
         }
     }
     BackupActionRow("♻️", "app.reset", "app.reset.desc", "", busy, doReset)
+}
+
+/**
+ * Fork-only: export the emulator log, the crash dumps and a device report as one
+ * zip, through the Storage Access Framework.
+ *
+ * Same mechanism as Backup above, for a different reason. ARMSX3.log lives in the
+ * data root's cache directory, i.e. under Android/data, which no file manager can
+ * open since Android 11 -- all-files access explicitly does not cover it. Without
+ * this the only way to read a log off a device is adb, which means a PC, which
+ * means the person testing has to be at a desk.
+ *
+ * What goes in the zip is described in ForkDiagnostics; the part that cannot come
+ * from anywhere else is device.txt, which reads CTR_EL0 pinned to each core.
+ */
+@Composable
+private fun DiagnosticsExportRow() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+
+    val exporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        status = I18n.get("app.diag.working")
+        // IO: the log runs to megabytes after a long session, and zipping it on the
+        // main thread would jank the settings screen or ANR outright.
+        scope.launch(Dispatchers.IO) {
+            val r = runCatching {
+                context.contentResolver.openOutputStream(uri)?.use {
+                    com.armsx2.ForkDiagnostics.export(context, it)
+                } ?: com.armsx2.ForkDiagnostics.Outcome(false, "could not open destination")
+            }.getOrElse { com.armsx2.ForkDiagnostics.Outcome(false, it.message ?: "failed") }
+            withContext(Dispatchers.Main) {
+                busy = false
+                status = if (r.ok) I18n.get("app.diag.exported").replace("%s", r.detail)
+                         else I18n.get("app.diag.failed").replace("%s", r.detail)
+                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    BackupActionRow(
+        "\uD83E\uDE7A", "app.diag.export", "app.diag.export.desc", status, busy,
+        { if (!busy) exporter.launch(com.armsx2.ForkDiagnostics.suggestedName()) },
+    )
 }
 
 @Composable

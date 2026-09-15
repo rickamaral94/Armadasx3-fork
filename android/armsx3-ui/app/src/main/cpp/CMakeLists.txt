@@ -15,7 +15,9 @@ else()
 	add_library(adrenotools INTERFACE)
 endif()
 
-add_library(${CMAKE_PROJECT_NAME} SHARED native-lib.cpp)
+# fork_diag.cpp is fork-only (on-device diagnostics: CTR_EL0 per core). Kept as
+# its own file rather than folded into native-lib.cpp so it rebases cleanly.
+add_library(${CMAKE_PROJECT_NAME} SHARED native-lib.cpp fork_diag.cpp)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     android
