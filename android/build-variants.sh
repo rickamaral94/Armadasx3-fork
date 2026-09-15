@@ -207,7 +207,14 @@ build_variant() {
 
 	# assembleGithubRelease, not assembleRelease: the flavor split means there is no
 	# flavorless release variant any more. The play bundle is built by build-play-aab.sh.
-	( cd "$UI" && ./gradlew --quiet :app:assembleGithubRelease "-Parmsx3.minSdk=$api" )
+	#
+	# --quiet by default, because interactively the Gradle stage is the short one at the
+	# end of a long native build. It is the wrong default in CI: an OOM in the daemon
+	# reports "Java heap space" with no task name, and --quiet is why. ARMSX3_GRADLE_LOG
+	# replaces the flag (--console=plain restores per-task lines) so a failure there can
+	# be attributed without another hour-long build.
+	( cd "$UI" && ./gradlew "${ARMSX3_GRADLE_LOG:---quiet}" \
+		:app:assembleGithubRelease "-Parmsx3.minSdk=$api" )
 
 	local version
 	version="$(version_name)"

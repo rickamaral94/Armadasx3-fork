@@ -170,7 +170,9 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1
         with:
           key: android-core-${{ github.ref_name }}
-          max-size: 4G
+          # 4G evicted: one full build of this tree stores ~3.3 GB, so the cache
+          # was throwing away entries it was about to be asked for again.
+          max-size: 6G
 
       - name: Build
         env:
@@ -182,6 +184,20 @@ jobs:
           # a cold build.
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          # The runner has 16 GB and nothing else to spend it on by the time
+          # Gradle starts, so give the daemon more than the 6g gradle.properties
+          # commits to for contributors' machines. A daemon that dies of "Java
+          # heap space" costs a whole rebuild to discover.
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx10g
+          # ccache identifies the compiler by mtime and size by default. This job
+          # installs the NDK fresh on every run, so clang's mtime is new every
+          # time and every object misses -- 278 hits against 3364 misses on a run
+          # that restored a 2.6 GB cache. Hashing the binary's contents instead
+          # makes the cache mean something across runs.
+          CCACHE_COMPILERCHECK: content
+          # Replaces build-variants.sh's --quiet. Per-task lines are what turn a
+          # bare "Java heap space" into a named failing task.
+          ARMSX3_GRADLE_LOG: --console=plain
         run: |
           set -o pipefail
           mkdir -p "$OUT_DIR"
