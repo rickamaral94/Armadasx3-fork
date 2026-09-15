@@ -15,9 +15,12 @@ plugins {
 //    The emulator CORE is a prebuilt libarmsx3-core.so (upstream RPCS3 via
 //    android/configure.sh) that the glue dlopen()s at runtime -- building that
 //    from Gradle would drag LLVM into every sync.
-//  * NO Discord SDK staging. That path requires DISCORD_SDK_DIR pointed at a
-//    hand-staged directory or Kotlin will not compile at all, and it is not on
-//    the critical path for standing the UI up.
+//  * NO Discord SDK staging. The SDK is proprietary and gitignored, so a clean
+//    clone builds without it; see the dependencies block. (The claim that used
+//    to be here -- that Kotlin will not compile without it -- is not what
+//    happens: the Kotlin side only reaches those classes through Class.forName,
+//    and a CI build compiled the whole module fine. What actually broke was
+//    classpath resolution against the missing .aar.)
 //  * NO product flavors, no PGO, no dual page-size cores - all PCSX2-specific.
 //
 // The source package stays com.armsx2 on purpose: renaming 129 files buys
@@ -274,7 +277,22 @@ dependencies {
     // without this the :discord process aborts with ClassNotFoundException even
     // though the .so links fine. proguard-rules.pro keeps them from being
     // renamed for the same reason.
-    implementation(files("libs/discord_partner_sdk.aar"))
+    //
+    // Only when it is actually staged. The .aar is gitignored -- Discord's terms
+    // do not permit redistributing it -- and an unconditional files() dependency
+    // does NOT quietly skip a missing file: resolving the runtime classpath fails
+    // the build with "Failed to transform discord_partner_sdk.aar ... (No such
+    // file or directory)" at :app:mergeGithubReleaseNativeLibs, long after the
+    // native build has finished. Same shape as the CMake guard on the bridge.
+    val discordSdkAar = file("libs/discord_partner_sdk.aar")
+    if (discordSdkAar.isFile) {
+        implementation(files(discordSdkAar))
+    } else {
+        logger.lifecycle(
+            "Discord Social SDK not staged ($discordSdkAar); building without it. " +
+            "DiscordNative logs \"libarmsx2_discord.so unavailable\" at runtime."
+        )
+    }
 
     implementation(libs.androidx.browser)
 
