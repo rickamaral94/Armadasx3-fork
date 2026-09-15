@@ -177,12 +177,39 @@ jobs:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
+          set -o pipefail
           mkdir -p "$OUT_DIR"
-          tools/fork/build.sh ${{ github.event.inputs.variants || 'a13' }}
+          tools/fork/build.sh ${{ github.event.inputs.variants || 'a13' }} 2>&1 | tee build.log
+
+      # The compiler error that stops a build sits in the middle of thousands of
+      # progress lines, with ~240 lines of runner cleanup after it. Finding it
+      # meant pulling the whole log back repeatedly. Print the part that matters.
+      - name: What failed
+        if: failure()
+        run: |
+          echo "::group::Failed targets"
+          grep -nE '^FAILED:|^ninja: error:' build.log | head -20 || echo "(none)"
+          echo "::endgroup::"
+          echo "::group::Errors, with context"
+          grep -nE 'error:|fatal error:' build.log | head -40 || echo "(none)"
+          echo "::endgroup::"
+          echo "::group::Last 40 lines"
+          tail -40 build.log
+          echo "::endgroup::"
 
       - name: Disk after build
         if: always()
         run: df -h /
+
+      # Kept whether or not the build succeeded: on success it records how long
+      # each stage took, on failure it is the full context behind the summary above.
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
 
       - name: Upload APK and build record
         uses: actions/upload-artifact@v4

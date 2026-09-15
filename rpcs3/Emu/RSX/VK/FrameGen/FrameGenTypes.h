@@ -23,7 +23,11 @@
 
 #include "util/types.hpp"
 #include "FrameGenConfig.h"
-#include "Config.h"
+// Utilities/Config.h, qualified. Left over from the PCSX2/Eden original, where a bare
+// "Config.h" resolves; from this directory it resolves to nothing and the translation unit
+// dies with "'Config.h' file not found". Every other file in rpcs3/ spells it with the
+// Utilities/ prefix, and only Utilities/*.cpp -- which sit next to it -- use the bare form.
+#include "Utilities/Config.h"
 
 #include <algorithm>
 #include <cstddef>
