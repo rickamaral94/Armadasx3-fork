@@ -325,3 +325,57 @@ os dois. Não é uma regressão silenciosa; é uma escolha registrada aqui.
 
 Reverter é barato: clonar `lsfg-vk-android` no lugar certo faz o cmake definir o
 alvo de novo, e o script passa a construí-lo sem mais nenhuma mudança.
+
+---
+
+## ADR-0004 — Os efeitos sonoros do menu entram como silêncio gerado
+
+**Data:** 2026-09-15
+**Status:** aceito, reversível a custo zero
+**Contexto:** primeira build do APK a chegar na compilação Kotlin
+
+### Problema
+
+`:app:compileGithubReleaseKotlin` falhou com quinze erros iguais:
+
+    MenuSfx.kt:43:26 Unresolved reference 'sfx_nav_a'
+
+Os treze arquivos `res/raw/sfx_*` nunca estiveram neste repositório. A causa é
+a linha 31 do `.gitignore` da raiz: um `*.wav` sem qualificação, herdado do
+RPCS3 upstream, onde serve para dumps de áudio. Nenhum commit desta história
+carregou esses arquivos, e `git log -S` confirma que só os `.kt` que os
+referenciam existem.
+
+É a mesma armadilha que o `jniLibs/.gitignore` já documenta para o `*.so` e as
+bibliotecas do ANGLE — com uma diferença: lá o efeito era silencioso (APK sem
+ANGLE, fallback mudo para o driver do sistema); aqui `MenuSfx.kt` referencia os
+treces recursos incondicionalmente, então um clone limpo **não compila**.
+
+### Decisão
+
+1. **Desfazer a regra por padrão**, em `res/raw/.gitignore`, com `!sfx_*.wav` —
+   mesma forma da correção do ANGLE.
+2. **Commitar treze WAVs de 40 ms de silêncio digital**, gerados, com os nomes
+   exatos que o código exige.
+
+### Por que silêncio e não outra coisa
+
+As alternativas eram piores:
+
+- **Adaptar o `MenuSfx.kt` para tolerar recurso ausente** mexe em código de UI
+  upstream cujo enum expõe `Int` de recurso para outros arquivos. Blast radius
+  maior e atrito de rebase (regra 6) para resolver um problema de asset.
+- **Gerar os placeholders no build** esconderia o defeito em vez de registrá-lo.
+
+Não tenho os clipes originais e não vou inventar áudio autoral. Silêncio é o
+placeholder honesto: o `SoundPool` toca, toda interação funciona, nada quebra.
+
+### Consequência que precisa ficar explícita
+
+**O APK do fork não tem efeitos sonoros de menu.** Quem comparar com um build
+feito na máquina de um dev do ARMSX3, onde os arquivos originais estão na cópia
+de trabalho, vai ouvir diferença. Não afeta FPS nem frametime em jogo — é UI de
+launcher — mas é uma diferença entre binários e por isso está registrada.
+
+Restaurar é só soltar os clipes reais nos mesmos treze nomes: nenhuma mudança de
+código, e o `.gitignore` local agora permite commitá-los.

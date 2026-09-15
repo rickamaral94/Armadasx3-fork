@@ -1,0 +1,10 @@
+# The repo root .gitignore carries a blanket `*.wav` rule -- upstream RPCS3's,
+# meant for audio dumps -- and it silently swallowed this app's menu sound
+# effects. They are referenced unconditionally as R.raw.sfx_* by MenuSfx.kt, so
+# a clean clone did not just lose its UI sounds: it could not compile at all,
+# with fifteen "Unresolved reference 'sfx_nav_a'" errors and nothing to say why
+# the file was missing.
+#
+# Same class as the ANGLE libraries and the same fix, un-ignored by pattern
+# here. See jniLibs/.gitignore, which describes the identical trap with `*.so`.
+!sfx_*.wav
