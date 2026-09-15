@@ -134,11 +134,30 @@ jobs:
       - name: Install NDK and CMake
         run: |
           set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          # NOT `yes | sdkmanager --licenses`.
+          #
+          # sdkmanager stops reading once it has what it needs, `yes` then dies of
+          # SIGPIPE, and pipefail turns that into a failed step -- which is exactly
+          # how this job died at 3 minutes with nothing but "yes: standard output:
+          # Broken pipe" to show for it. A bounded number of lines cannot break the
+          # pipe, so no failure to swallow.
+          #
+          # Best-effort on purpose: the runner image already has these licences
+          # accepted, and the install below is the step that must actually succeed.
+          printf 'y\n%.0s' $(seq 50) | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
           # NDK 29 specifically: clang 19 (NDK 28) does not compile this tree.
           # android/configure.sh records why, and pins the same versions.
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            'ndk;29.0.14206865' 'cmake;3.30.5' >/dev/null
+          "$SDKMANAGER" 'ndk;29.0.14206865' 'cmake;3.30.5' >/dev/null
+
+          # Fail here rather than inside cmake if the install silently did nothing.
+          test -d "$ANDROID_HOME/ndk/29.0.14206865" || {
+            echo "NDK 29.0.14206865 not installed; sdkmanager reported success" >&2
+            ls -la "$ANDROID_HOME/ndk" || true
+            exit 1
+          }
           ls "$ANDROID_HOME/ndk"
 
       - name: ccache
