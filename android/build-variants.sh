@@ -158,7 +158,22 @@ build_variant() {
 	# volkLoadDevice() repoint the whole renderer at framegen's device. The consequence for the
 	# build is that it is NOT a dependency of libarmsx3-core.so and will not be built by asking
 	# for it: name it here or ship an APK with frame generation silently missing.
-	PATH="$CMAKE_BIN:$PATH" ninja -C "$build_dir" android/libarmsx3-core.so armsx3_lsfg
+	# Ask for it only when cmake actually defined it. 3rdparty/lsfg/CMakeLists.txt
+	# returns early when 3rdparty/lsfg/lsfg-vk-android is absent -- it is an
+	# external checkout, in neither .gitmodules nor .gitignore nor the README --
+	# and naming an undefined target is a hard ninja error, not a warning:
+	#
+	#     ninja: error: unknown target 'armsx3_lsfg'
+	#
+	# So a clean clone could not build at all, while the block below already
+	# handles the .so being absent and carries on. This makes the two agree.
+	if PATH="$CMAKE_BIN:$PATH" ninja -C "$build_dir" -t query armsx3_lsfg >/dev/null 2>&1; then
+		PATH="$CMAKE_BIN:$PATH" ninja -C "$build_dir" android/libarmsx3-core.so armsx3_lsfg
+	else
+		echo "==> $name: frame generation not configured (3rdparty/lsfg/lsfg-vk-android absent);" \
+			"building the core without it"
+		PATH="$CMAKE_BIN:$PATH" ninja -C "$build_dir" android/libarmsx3-core.so
+	fi
 
 	local ndk_bin
 	ndk_bin="$(armsx3_ndk_bin "$ANDROID_HOME/ndk/$ndk")" || return 1

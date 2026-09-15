@@ -271,3 +271,57 @@ dependendo de instalar os dois APKs no Odin 2.
   `raw.githubusercontent.com/ARMSX2/ARMSX3/master/...`. É conteúdo, não
   identidade, e o bridge do Discord depende de um SDK proprietário que este
   fork não distribui. Fica para quando/se esse caminho for exercitado.
+
+---
+
+## ADR-0003 — Geração de quadros (LSFG) fica fora dos builds do fork por ora
+
+**Data:** 2026-09-15
+**Status:** aceito
+**Fase:** 0 (bootstrap) / 1 (baseline)
+
+### Contexto
+
+O terceiro build no CI configurou o cmake inteiro com sucesso e então morreu em:
+
+    ninja: error: unknown target 'armsx3_lsfg'
+
+`3rdparty/lsfg/CMakeLists.txt` faz `return()` cedo quando
+`3rdparty/lsfg/lsfg-vk-android` não existe. Esse diretório é um **checkout
+externo** — não está em `.gitmodules`, não está no `.gitignore`, e o README não
+o menciona. Ou seja: **um clone limpo do upstream não compila**, e nada avisa.
+
+O `android/build-variants.sh` já tolerava o `.so` não existir (imprime "frame
+generation will be absent from this APK" e segue), mas pedia o alvo ao ninja
+incondicionalmente — e nomear alvo inexistente é erro duro, não aviso. As duas
+metades do script discordavam entre si.
+
+### Decisão
+
+1. **Corrigir o script** (candidato a upstream): só pedir `armsx3_lsfg` quando
+   `ninja -t query` confirmar que o alvo existe. As duas metades passam a
+   concordar, e um clone limpo compila.
+2. **Não buscar `lsfg-vk-android` por enquanto.** Os builds do fork saem sem
+   geração de quadros.
+
+### Por que não buscar
+
+- **Não é candidato a pin como librashader e libadrenotools foram (ADR-0001).**
+  Aqueles são dependências que o core usa em caminho normal. Esta é uma feature
+  opcional, só do flavor `github`, carregada por `dlopen` e já projetada para
+  ausência.
+- **Geração de quadros é uma variável a medir, não a assumir.** Ela inventa
+  quadros; FPS com ela ligada não é comparável a FPS sem ela, e o `BASELINE.md`
+  ainda está vazio. Incluí-la no baseline misturaria duas perguntas.
+- Um `.so` a menos no APK é uma variável a menos entre o build do fork e o do
+  upstream durante o A/B — desde que registrado, que é o propósito deste ADR.
+
+### Consequência que precisa ficar explícita
+
+**O APK do fork não terá geração de quadros enquanto isso valer.** Se o build
+do upstream que você comparar tiver, isso é uma diferença conhecida entre os
+dois binários e precisa constar em qualquer linha de `PERF-LOG.md` que compare
+os dois. Não é uma regressão silenciosa; é uma escolha registrada aqui.
+
+Reverter é barato: clonar `lsfg-vk-android` no lugar certo faz o cmake definir o
+alvo de novo, e o script passa a construí-lo sem mais nenhuma mudança.
