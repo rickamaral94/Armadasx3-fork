@@ -30,14 +30,22 @@ on:
         default: 'a13'
         required: false
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+# Concurrency is per JOB, not workflow-wide.
+#
+# A workflow-level group with cancel-in-progress killed a running core build the
+# moment any commit was pushed to the branch -- which is guaranteed to happen
+# during a build that takes hours, and did: run 4 was cancelled 2 minutes in by
+# the very next push. The two jobs want opposite policies, so they get their own
+# groups.
 
 jobs:
   checks:
     name: Fork checks
     runs-on: ubuntu-24.04
+    # Cheap and fast: only the newest commit's answer is interesting.
+    concurrency:
+      group: ${{ github.workflow }}-checks-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,6 +87,12 @@ jobs:
     # Tags and manual runs only -- see the header.
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
+    # Never cancelled by a newer run. Hours of work and a warm ccache are not
+    # worth discarding for a commit that may not even touch the core; a second
+    # request queues behind this one instead.
+    concurrency:
+      group: ${{ github.workflow }}-core-${{ github.ref }}
+      cancel-in-progress: false
     timeout-minutes: 350   # the hard ceiling is 360; fail before the runner is killed
     steps:
       # The default runner has roughly 21 GB free. A cold build is the LLVM
