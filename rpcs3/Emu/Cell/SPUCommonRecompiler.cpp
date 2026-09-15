@@ -133,6 +133,24 @@ static shared_mutex s_spu_failed_blocks_mutex;
 // offset to the interpreter.
 static spu_failed_block_set s_spu_failed_blocks;
 
+// How often each failed block is actually reached.
+//
+// spu_mark_block_compile_failed already logs WHICH blocks the backend gave up on, once each. What
+// it cannot say is whether any of them matters: a block that fails to compile and is never entered
+// costs nothing, and a recompiler fix aimed at it buys nothing. Only the ones dispatch keeps
+// landing on are worth the work, and the difference between those two cases is several orders of
+// magnitude, not a judgement call.
+//
+// Counted at dispatch, so the weight is block entries rather than interpreted instructions -- the
+// interpreter loop for a failed block lives in old_interpreter, which has no cheap place to
+// accumulate. Entries are enough to separate "never runs" from "runs constantly", which is the
+// question being asked here.
+//
+// Declared HERE, beside the set it indexes, rather than beside its first heavy user further down:
+// spu_reset_failed_blocks() clears it a few lines below, and a file-scope static has to be declared
+// before use.
+static cpu_fallback_stats s_spu_failed_block_hits;
+
 static void spu_reset_failed_blocks()
 {
 	std::lock_guard lock(s_spu_failed_blocks_mutex);
@@ -173,20 +191,6 @@ static bool spu_interpreter_fallback_available()
 {
 	return true;
 }
-
-// How often each failed block is actually reached.
-//
-// spu_mark_block_compile_failed already logs WHICH blocks the backend gave up on, once each. What
-// it cannot say is whether any of them matters: a block that fails to compile and is never entered
-// costs nothing, and a recompiler fix aimed at it buys nothing. Only the ones dispatch keeps
-// landing on are worth the work, and the difference between those two cases is several orders of
-// magnitude, not a judgement call.
-//
-// Counted at dispatch, so the weight is block entries rather than interpreted instructions -- the
-// interpreter loop for a failed block lives in old_interpreter, which has no cheap place to
-// accumulate. Entries are enough to separate "never runs" from "runs constantly", which is the
-// question being asked here.
-static cpu_fallback_stats s_spu_failed_block_hits;
 
 // Defined in PPUThread.cpp, where both PPU tables live.
 extern void cpu_fallback_report_maybe();
