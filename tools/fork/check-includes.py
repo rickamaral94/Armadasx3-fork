@@ -1,68 +1,72 @@
 #!/usr/bin/env python3
-"""Fail when a quoted #include only resolves on a case-insensitive filesystem.
+"""Fail when an #include only resolves on a case-insensitive filesystem.
 
 ARMSX3 and RPCS3 are developed largely on macOS and Windows, where
-    #include "Emu/system.h"
-happily finds rpcs3/Emu/System.h. On Linux -- every CI runner, and the Android
-cross build -- it does not, and the build dies ~50 minutes in with a
+
+    #include "Emu/system.h"      (the file is Emu/System.h)
+    #include <gl/gl.h>           (the file is savers/compat/GL/gl.h)
+
+both find their target. On Linux -- every CI runner, and the Android cross
+build -- neither does, and the build dies forty to fifty minutes in with a
 one-line "file not found" that says nothing about why it worked for the author.
+Both of those are real bugs this fork hit, one per build, an hour apart.
 
-This catches that class in under a second, so it is a `Fork checks` failure
-instead of a wasted core build.
-
-Rule: an include is reported only when it fails to resolve with exact case AND
-resolves when case is ignored. Everything else is left alone -- the tree has
-~120 quoted includes that resolve through -isystem paths, generated headers or
-platform SDKs this script deliberately knows nothing about, and guessing at
-those would make the check useless.
+The rule, which is the whole design: an include is reported only when the
+repository contains a file at that path suffix with DIFFERENT case and none
+with the same case. Nothing else is judged. The tree has ~120 includes that
+resolve through -isystem paths, generated headers or platform SDKs (Qt, ffmpeg,
+protobuf, the NDK, the Windows SDK); a checker with opinions about those would
+be wrong constantly and get ignored.
 """
 
 import os
 import re
 import sys
 
-# The quoted-include search path shared by the targets this fork builds. Only
-# roots that exist in a clean checkout; missing ones are skipped, not an error.
-INCLUDE_ROOTS = ("", "rpcs3", "3rdparty")
+# First-party sources. 3rdparty and git submodules are excluded: not ours to
+# fix, and those projects build on Linux already.
+SOURCE_DIRS = (
+    "rpcs3",
+    "Utilities",
+    "util",
+    "android/src",
+    "android/armsx3-ui/app/src/main/cpp",
+)
 
-# Where first-party sources live. 3rdparty is excluded on purpose: its files are
-# not ours to fix, and upstream projects build on Linux already.
-SOURCE_DIRS = ("rpcs3", "android/src", "Utilities", "util")
+SOURCE_SUFFIXES = (".cpp", ".cc", ".c", ".h", ".hpp", ".inl")
+SKIP_DIRS = {".git", "build", "build-a13", "build-a14", "build-a15", ".cxx"}
 
-SOURCE_SUFFIXES = (".cpp", ".cc", ".h", ".hpp", ".inl")
-SKIP_DIRS = {".git", "build", "build-a13", "build-a14", "build-a15"}
-
-INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+"([^"]+)"', re.M)
+# Both spellings, keeping which one was used: it decides how a bare name is
+# treated below. <> and "" differ in search order, not in case sensitivity.
+INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+(?:<([^>]+)>|"([^"]+)")', re.M)
 
 
-def index_root(base):
-    """lowercased relative path -> the real relative path, for one search root."""
-    out = {}
+def walk(base):
+    """Yield files under base, skipping build output and nested git repos."""
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in SKIP_DIRS
+            and not os.path.exists(os.path.join(dirpath, d, ".git"))
+        ]
         for name in filenames:
-            rel = os.path.relpath(os.path.join(dirpath, name), base)
-            out.setdefault(rel.lower(), rel)
-    return out
+            yield os.path.join(dirpath, name)
 
 
 def main():
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    roots = [os.path.join(root, r) if r else root for r in INCLUDE_ROOTS]
-    roots = [r for r in roots if os.path.isdir(r)]
-    indexes = [(r, index_root(r)) for r in roots]
+    # basename (lowercased) -> repo-relative paths, with "/" separators.
+    by_name = {}
+    for path in walk(root):
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
+        by_name.setdefault(os.path.basename(rel).lower(), []).append(rel)
 
     sources = []
     for src_dir in SOURCE_DIRS:
         base = os.path.join(root, src_dir)
-        if not os.path.isdir(base):
-            continue
-        for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-            for name in filenames:
-                if name.endswith(SOURCE_SUFFIXES):
-                    sources.append(os.path.join(dirpath, name))
+        if os.path.isdir(base):
+            sources += [p for p in walk(base) if p.endswith(SOURCE_SUFFIXES)]
 
     findings = []
     for path in sorted(sources):
@@ -70,32 +74,46 @@ def main():
             text = handle.read()
 
         own_dir = os.path.dirname(path)
+
         for match in INCLUDE_RE.finditer(text):
-            inc = match.group(1).replace("\\", "/")
+            angled = match.group(1) is not None
+            inc = (match.group(1) or match.group(2)).replace("\\", "/")
 
-            # Exact resolution: the including file's own directory first, as the
-            # quoted form does, then the -I roots.
-            candidates = [os.path.join(own_dir, inc)]
-            candidates += [os.path.join(r, inc) for r in roots]
-            if any(os.path.exists(c) for c in candidates):
-                continue
-
-            actual = None
-            lowered = inc.lower()
-            if os.path.dirname(lowered) == "":
+            if "/" not in inc:
+                # A bare name matched against every file in the tree is pure
+                # noise: <elf.h> is libc's, <config.h> is autotools', and both
+                # collide with unrelated headers here. A bare quoted name does
+                # resolve next to its own file, so that much is checkable.
+                if angled:
+                    continue
+                actual = None
                 for name in os.listdir(own_dir):
-                    if name.lower() == lowered:
+                    if name == inc:
+                        actual = None
+                        break
+                    if name.lower() == inc.lower():
                         actual = os.path.relpath(os.path.join(own_dir, name), root)
-                        break
-            if actual is None:
-                for base, index in indexes:
-                    if lowered in index:
-                        actual = os.path.relpath(os.path.join(base, index[lowered]), root)
-                        break
-            if actual is None:
-                # Unresolvable here for some other reason (an -isystem path, a
-                # generated header, a platform SDK). Not this check's business.
-                continue
+                if actual is None:
+                    continue
+            else:
+                candidates = by_name.get(os.path.basename(inc).lower(), ())
+                if not candidates:
+                    continue  # not a file this repository carries at all
+
+                suffix = "/" + inc
+                # Same case somewhere in the tree: whatever the compiler ends
+                # up picking, case is not the problem.
+                if any(c == inc or c.endswith(suffix) for c in candidates):
+                    continue
+
+                lowered = suffix.lower()
+                actual = next(
+                    (c for c in candidates
+                     if c.lower() == inc.lower() or c.lower().endswith(lowered)),
+                    None,
+                )
+                if actual is None:
+                    continue
 
             line = text.count("\n", 0, match.start()) + 1
             findings.append((os.path.relpath(path, root), line, inc, actual))
@@ -105,7 +123,7 @@ def main():
         return 0
 
     for path, line, inc, actual in findings:
-        print('%s:%d: include "%s" resolves only if case is ignored; the file is %s'
+        print("%s:%d: #include %s resolves only if case is ignored; the file is %s"
               % (path, line, inc, actual), file=sys.stderr)
     print("", file=sys.stderr)
     print("%d include(s) that build on macOS/Windows and fail on Linux." % len(findings),
