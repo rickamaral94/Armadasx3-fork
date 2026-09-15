@@ -83,9 +83,14 @@ JNI_LIBS_GITHUB="$UI/app/src/github/jniLibs/arm64-v8a"
 # in front of them. It is also what the in-app updater matches on, so changing one of these
 # strings changes which APK an existing install offers; keep them in step with pickApkAsset
 # in UpdaterEntry.kt.
+# shellcheck disable=SC2034  # read through indirect expansion: ${!spec_var} below
 VARIANT_legacy="29.0.14206865:30:armv8.1-a:legacy-armv8.1-sdk30"
+# shellcheck disable=SC2034
+
 VARIANT_a11="29.0.14206865:30:armv8.2-a+dotprod+fp16:a11-armv8.2-sdk30"
+# shellcheck disable=SC2034
 VARIANT_a13="29.0.14206865:33:armv8.2-a+dotprod+fp16:a13-armv8.2-sdk33"
+# shellcheck disable=SC2034
 VARIANT_a15="29.0.14206865:35:armv8.2-a+dotprod+fp16:a15-armv8.2-sdk35"
 
 VARIANTS="${VARIANTS:-${*:-legacy a11 a13 a15}}"
@@ -189,7 +194,9 @@ build_variant() {
 	# flavorless release variant any more. The play bundle is built by build-play-aab.sh.
 	( cd "$UI" && ./gradlew --quiet :app:assembleGithubRelease "-Parmsx3.minSdk=$api" )
 
-	local out="$OUT_DIR/ARMSX3-$(version_name)-$suffix.apk"
+	local version
+	version="$(version_name)"
+	local out="$OUT_DIR/ARMSX3-$version-$suffix.apk"
 	cp "$UI/app/build/outputs/apk/github/release/app-github-release.apk" "$out"
 	echo "==> $name: $out"
 }

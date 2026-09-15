@@ -24,7 +24,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
+# || exit, because these scripts run without `set -e` on purpose -- they report every
+# failure rather than stopping at the first -- so a failed cd would otherwise leave them
+# checking the wrong directory and reporting a false OK.
+cd "$ROOT" || exit 1
 
 FIX=0
 REQUIRE_ALL=0
