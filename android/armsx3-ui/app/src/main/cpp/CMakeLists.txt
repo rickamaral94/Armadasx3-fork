@@ -159,14 +159,33 @@ target_link_libraries(savers log GLESv2 m)
 # The prebuilt libdiscord_partner_sdk.so ships in the .aar too; it is referenced
 # here as an IMPORTED target so the bridge links, and the .aar is what actually
 # packages it.
+#
+# The SDK is NOT in this repository -- .gitignore excludes discord_sdk/ and the
+# .aar, because Discord distributes it per-application from the developer portal
+# and its terms do not permit redistribution. So the bridge is built only when
+# someone has staged it. Without the guard a clean clone cannot produce an APK
+# at all: ninja stops with "libdiscord_partner_sdk.so, needed by
+# libarmsx2_discord.so, missing and no known rule to make it".
+#
+# Everything downstream already expects the absence. DiscordNative.java catches
+# the UnsatisfiedLinkError from System.loadLibrary("armsx2_discord") and logs
+# "libarmsx2_discord.so unavailable"; the Kotlin side reaches the SDK's classes
+# only through Class.forName. The build system was the one part that insisted.
 # ---------------------------------------------------------------------------
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+set(ARMSX2_DISCORD_SDK_LIB
+    ${CMAKE_CURRENT_SOURCE_DIR}/discord_sdk/arm64-v8a/libdiscord_partner_sdk.so)
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND EXISTS ${ARMSX2_DISCORD_SDK_LIB})
     add_library(discord_partner_sdk SHARED IMPORTED)
     set_target_properties(discord_partner_sdk PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/discord_sdk/arm64-v8a/libdiscord_partner_sdk.so)
+        IMPORTED_LOCATION ${ARMSX2_DISCORD_SDK_LIB})
 
     add_library(armsx2_discord SHARED discord_bridge.cpp)
     target_include_directories(armsx2_discord PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/discord_sdk/include)
     target_compile_features(armsx2_discord PRIVATE cxx_std_17)
     target_link_libraries(armsx2_discord discord_partner_sdk log android)
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    message(STATUS
+        "Discord Social SDK not staged (${ARMSX2_DISCORD_SDK_LIB}); "
+        "building without the bridge. Stage the SDK and set DISCORD_SDK_DIR to enable it.")
 endif()
