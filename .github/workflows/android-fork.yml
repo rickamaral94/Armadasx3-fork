@@ -65,6 +65,12 @@ jobs:
       - name: Fork identity and build portability
         run: tools/fork/check-identity.sh
 
+      # A case-only include mismatch compiles on the macOS and Windows machines
+      # ARMSX3 is written on and fails on Linux, ~50 minutes into the core
+      # build. One second here instead.
+      - name: Include case
+        run: python3 tools/fork/check-includes.py
+
       - name: shellcheck
         run: |
           sudo apt-get update -qq
