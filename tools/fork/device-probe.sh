@@ -131,6 +131,28 @@ ONLINE_PARTS="$(printf '%s\n' "$CPUINFO" | awk '
 ')"
 
 # ---------------------------------------------------------------------------
+# Cache line sizes, per core
+#
+# This decides whether a real hazard applies to this device. Publishing JIT code
+# on ARM64 needs a DC/IC loop that steps by the cache line size, and if that size
+# is read once on a big core and later used on a LITTLE core with a smaller line,
+# the loop strides past lines it should have touched -- stale instructions,
+# intermittently, with no other symptom.
+#
+# Dolphin refuses __builtin___clear_cache over exactly this and reads CTR_EL0
+# itself, keeping a running minimum. asmjit -- which this fork's JIT uses for all
+# its cache maintenance -- calls __builtin___clear_cache. Linux mitigates the
+# hazard by trapping and sanitising CTR_EL0 on mismatched systems, so the
+# question is not settled by argument: it is settled by whether the line sizes on
+# THIS device actually differ.
+#
+# sysfs reports them per CPU without needing to execute an MRS.
+# ---------------------------------------------------------------------------
+CACHE_LINES="$(dev 'for c in /sys/devices/system/cpu/cpu[0-9]*/cache/index[0-9]*; do
+  echo "$c|$(cat $c/level 2>/dev/null)|$(cat $c/type 2>/dev/null)|$(cat $c/coherency_line_size 2>/dev/null)"
+done' | strip_cr)"
+
+# ---------------------------------------------------------------------------
 # ISA features
 #
 # Read from the Features line, which is the kernel reporting HWCAP. Note the
@@ -297,6 +319,19 @@ JSON="$OUT_DIR/$LABEL-$STAMP.json"
 	printf '    "sve2": %s\n'             "$(has_feature sve2)"
 	printf '  },\n'
 
+	printf '  "cache_lines": [\n'
+	first=1
+	printf '%s\n' "$CACHE_LINES" | while IFS='|' read -r path level type line; do
+		[ -n "${path:-}" ] || continue
+		cpu="$(printf '%s' "$path" | sed -n 's#.*/cpu\([0-9]*\)/cache/index\([0-9]*\)#\1#p')"
+		idx="$(printf '%s' "$path" | sed -n 's#.*/index\([0-9]*\)$#\1#p')"
+		[ $first -eq 1 ] || printf ',\n'
+		first=0
+		printf '    {"cpu": %s, "index": %s, "level": %s, "type": "%s", "line_bytes": %s}' \
+			"${cpu:-null}" "${idx:-null}" "${level:-null}" "$(jstr "${type:-}")" "${line:-null}"
+	done
+	printf '\n  ],\n'
+
 	printf '  "thermal_zones": [\n'
 	first=1
 	printf '%s\n' "$THERMAL" | while IFS='|' read -r path type temp; do
@@ -367,6 +402,26 @@ for id in $CPU_IDS; do
 		printf '    cpu%-2s %-12s (offline -- MIDR unreadable; bring it online and re-probe)\n' "$id" "OFFLINE"
 	fi
 done
+
+echo
+echo "Cache line sizes (the JIT publication hazard):"
+printf '%s\n' "$CACHE_LINES" | awk -F'|' '
+  $4 != "" { key = "L" $2 " " $3; if (!(key in seen)) { order[++n] = key } seen[key] = 1;
+             sizes[key "|" $4] = 1; all[$4] = 1 }
+  END {
+    for (i = 1; i <= n; i++) {
+      k = order[i]; out = ""
+      for (s in sizes) { split(s, p, "|"); if (p[1] == k) out = out " " p[2] }
+      printf "    %-12s%s bytes\n", k, out
+    }
+    d = 0; for (a in all) d++
+    if (d > 1)
+      print "    DIFFERENT line sizes across this device -- see docs/fork/A740-QUIRKS.md Q6."
+    else if (d == 1)
+      print "    Uniform. The big.LITTLE cache-line hazard does not apply here."
+    else
+      print "    <unreadable>"
+  }'
 
 cat <<SUMMARY
 

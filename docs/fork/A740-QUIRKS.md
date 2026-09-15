@@ -150,6 +150,68 @@ debuggable.
 > `applicationId` — o flavor `play` do upstream inclusive — liam o diretório de
 > outro app.
 
+### Q6 — Publicação de código JIT e o tamanho de linha de cache em big.LITTLE
+
+| | |
+|---|---|
+| Escopo | ARM64, qualquer driver |
+| Estado | **em aberto — precisa de medição no aparelho** |
+| Origem | comparação entre RPCS3/ARMSX3, Cemu e Dolphin |
+
+Publicar código recém-gerado no ARM64 exige limpar a linha de dados e invalidar a
+de instrução, num laço que avança pelo **tamanho da linha de cache**. Se esse
+tamanho for lido uma vez num núcleo grande e depois usado num núcleo pequeno com
+linha menor, o laço pula linhas que deveria ter tocado — instruções velhas,
+intermitentemente, sem nenhum outro sintoma.
+
+Os três emuladores tratam isso de formas diferentes:
+
+| | Como faz o flush |
+|---|---|
+| **ARMSX3** (nosso) | `asmjit::VirtMem::flushInstructionCache` → `__builtin___clear_cache` |
+| **Cemu** | `xbyak_aarch64::clearCache` → `__builtin___clear_cache` |
+| **Dolphin** | **recusa** `__builtin___clear_cache**; lê `CTR_EL0` a cada chamada e mantém o **mínimo global** observado |
+
+O comentário do Dolphin em `Source/Core/Common/Arm64Emitter.cpp` diz literalmente:
+*"Don't rely on GCC's `__clear_cache` implementation, as it caches icache/dcache
+cache line sizes, that can vary between cores on big.LITTLE architectures."*
+
+**Não está estabelecido que isso afete este aparelho.** O Linux mitiga o caso
+interceptando e sanitizando `CTR_EL0` em sistemas com linhas divergentes, e a
+implementação de `__clear_cache` varia entre libgcc e compiler-rt. A pergunta é
+empírica, não teórica: **as linhas de cache do QCS8550 divergem entre núcleos?**
+
+`tools/fork/device-probe.sh` agora responde isso. Ele lê
+`/sys/devices/system/cpu/cpu*/cache/index*/coherency_line_size` por núcleo e diz
+"Uniform" ou "DIFFERENT". Se vier uniforme, este quirk fecha sem trabalho
+nenhum. Se vier divergente, a abordagem do Dolphin vira candidata.
+
+Detalhe correlato que **não** se aplica aqui: o Dolphin usa `dc civac` em vez de
+`dc cvau` como contorno das erratas 819472/826319/827319/824069 do Cortex-A53.
+O QCS8550 não tem A53 (o menor núcleo é A510), então essa parte é irrelevante
+para este alvo.
+
+### Q7 — Memória do JIT é RWX, não W^X
+
+| | |
+|---|---|
+| Escopo | Android, ARM64 |
+| Estado | conhecido, sem plano de mudança |
+
+`protection::wx` no RPCS3 é `PROT_READ | PROT_WRITE | PROT_EXEC`
+(`rpcs3/util/vm_native.cpp`), e o `jit_write_guard`, que alterna proteção por
+thread, é `#ifdef __APPLE__` — no Android vira um `int` no-op.
+
+O Dolphin faz o mesmo: `mmap(PROT_READ|PROT_WRITE|PROT_EXEC)`, com
+`JITPageWriteEnableExecuteDisable()` implementado só em
+`_M_ARM_64 && __APPLE__`. O Cemu é o mais estrito dos três — o `readyRE()` do
+xbyak passa a página para R+X depois de gerar, então o código publicado não fica
+gravável.
+
+Não é bug e não há evidência de que custe performance; é postura de segurança.
+Fica registrado porque, se o Android endurecer a política de `execmem` para apps,
+os dois primeiros quebram e o terceiro não.
+
 ## Formato para novos quirks
 
 ```
