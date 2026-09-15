@@ -67,6 +67,7 @@ jobs:
             tools/fork/check-deps.sh \
             tools/fork/check-identity.sh \
             tools/fork/device-probe.sh \
+            tools/fork/check-log.sh \
             android/host-tools.sh \
             android/configure.sh \
             android/build-variants.sh \
