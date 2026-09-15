@@ -18,6 +18,7 @@
 #include "Emu/System.h"
 #include "PPUThread.h"
 #include "PPUInterpreter.h"
+#include "Emu/CPU/CPUFallbackStats.h"
 #include "PPUAnalyser.h"
 #include "PPUModule.h"
 #include "PPUDisAsm.h"
@@ -518,6 +519,101 @@ static void ppu_fallback(ppu_thread& ppu, ppu_opcode_t op, be_t<u32>* this_op, p
 	return _fn(ppu, op, this_op, next_fn);
 }
 
+// Defined in SPUCommonRecompiler.cpp, beside the failed-block set it reports on.
+extern void spu_report_failed_block_hits();
+
+// Interpreted-instruction attribution for the two fallback paths.
+//
+// Kept as two tables on purpose, because they mean opposite things. The recompiler table is
+// FAILURE: code the backend could not produce a function for, which is what recompiler work should
+// target. The reservation table is DESIGN: ppu_reservation_fallback interprets deliberately while a
+// reservation is held, and no amount of codegen work removes it. Summing them would produce a
+// single "interpreter %" that argues for work that cannot pay off.
+//
+// The existing PPUFALL1/PPUFALL2 perf_meters already time these paths, but only when
+// g_cfg.core.perf_report is on -- it defaults off -- and they give a total with no attribution.
+// A total says the interpreter cost something; it does not say which function to look at, and
+// without that the next step is guesswork.
+static cpu_fallback_stats g_ppu_recompiler_fallback_stats;
+static cpu_fallback_stats g_ppu_reservation_fallback_stats;
+
+// Rate limit for the report, in microseconds.
+//
+// A diagnostic that floods is a diagnostic that gets turned off, and this tree has already paid
+// for that lesson: an unguarded SPU code window emitted 538 lines a second over 31 dumps and left
+// a 690 MiB log, which on Android was itself a stall. Thirty seconds is long enough that the cost
+// is unmeasurable and short enough that a session killed by the low-memory killer still leaves
+// several reports behind.
+static constexpr u64 k_ppu_fallback_report_interval_us = 30'000'000;
+
+// std::atomic rather than atomic_t: this is a plain timestamp with a CAS, and standard semantics
+// are one less thing to get wrong.
+static std::atomic<u64> g_ppu_fallback_last_report{0};
+
+// Emit at most one report per interval. Called from the fallback paths themselves -- PPU here and
+// SPU in SPUCommonRecompiler.cpp -- so a session with no fallback produces no lines at all, which
+// is the answer rather than a missing feature. The build stamp logged at startup is what proves
+// the instrumentation is present.
+//
+// Not static: the SPU path must be able to trigger it too. Reporting only from the PPU paths would
+// mean a title that never falls back on PPU but hammers an uncompilable SPU block prints nothing,
+// which is precisely the case worth catching.
+void cpu_fallback_report_maybe()
+{
+	const u64 now = get_system_time();
+	u64 last = g_ppu_fallback_last_report.load(std::memory_order_relaxed);
+
+	if (now - last < k_ppu_fallback_report_interval_us)
+	{
+		return;
+	}
+
+	// Whoever wins the CAS reports; the rest carry on. Losing is not worth retrying, since the
+	// winner is emitting the same numbers this thread would have.
+	if (!g_ppu_fallback_last_report.compare_exchange_strong(last, now, std::memory_order_relaxed))
+	{
+		return;
+	}
+
+	const auto emit = [](const char* what, const cpu_fallback_stats& stats)
+	{
+		const u64 total = stats.total();
+
+		if (total == 0)
+		{
+			return;
+		}
+
+		std::string out;
+		fmt::append(out, "PPU fallback: %s -- %u instructions interpreted", what, total);
+
+		if (const u64 lost = stats.unattributed())
+		{
+			// Stated rather than hidden, so the percentages below are read as the share of a
+			// known total instead of as the whole picture.
+			fmt::append(out, " (%u unattributed)", lost);
+		}
+
+		const auto top = stats.snapshot();
+
+		for (usz i = 0; i < top.size() && i < 10; i++)
+		{
+			fmt::append(out, "\n  0x%08x  %u  (%.1f%%)", top[i].first, top[i].second,
+				100. * static_cast<f64>(top[i].second) / static_cast<f64>(total));
+		}
+
+		ppu_log.notice("%s", out);
+	};
+
+	emit("recompiler could not compile", g_ppu_recompiler_fallback_stats);
+	emit("reservation path (by design)", g_ppu_reservation_fallback_stats);
+
+	// The SPU side keeps its own table next to the failed-block set it indexes. Reported from the
+	// same rate limit so the two halves of the answer land together in the log rather than
+	// interleaved at different periods, which would make them look unrelated.
+	spu_report_failed_block_hits();
+}
+
 // TODO: Make this a dispatch call
 void ppu_recompiler_fallback(ppu_thread& ppu)
 {
@@ -530,6 +626,13 @@ void ppu_recompiler_fallback(ppu_thread& ppu)
 
 	const auto& table = g_fxo->get<ppu_interpreter_rt>();
 
+	// The address that fell back, captured before the interpreter moves cia. Weighting by
+	// instructions rather than by entries is what makes the ranking mean cost: a function entered
+	// once that interprets a million instructions must outrank one entered a million times that
+	// returns immediately.
+	const u32 entry = ppu.cia;
+	u64 interpreted = 0;
+
 	while (true)
 	{
 		if (uptr func = uptr(ppu_read(ppu.cia)); func != reinterpret_cast<uptr>(ppu_recompiler_fallback_ghc))
@@ -541,12 +644,19 @@ void ppu_recompiler_fallback(ppu_thread& ppu)
 		// Run one instruction in interpreter (TODO)
 		const u32 op = vm::read32(ppu.cia);
 		table.decode(op)(ppu, {op}, vm::_ptr<u32>(ppu.cia), &ppu_ret);
+		interpreted++;
 
 		if (ppu.test_stopped())
 		{
 			break;
 		}
 	}
+
+	// Both breaks fall through to here, so one record covers every exit. Zero is the case where a
+	// compiled function was already present and nothing was interpreted -- record_n ignores it
+	// rather than letting it claim a slot.
+	g_ppu_recompiler_fallback_stats.record_n(entry, interpreted);
+	cpu_fallback_report_maybe();
 }
 
 void ppu_reservation_fallback(ppu_thread& ppu)
@@ -555,11 +665,30 @@ void ppu_reservation_fallback(ppu_thread& ppu)
 
 	const auto& table = g_fxo->get<ppu_interpreter_rt>();
 
+	// Unlike the recompiler path this one returns from inside the loop, so the count is flushed by
+	// a scope guard rather than after it. Missing the early exits would undercount exactly the
+	// short reservation windows that dominate here.
+	const u32 entry = ppu.cia;
+	u64 interpreted = 0;
+
+	struct flush_on_exit
+	{
+		const u32 entry;
+		const u64& interpreted;
+
+		~flush_on_exit()
+		{
+			g_ppu_reservation_fallback_stats.record_n(entry, interpreted);
+			cpu_fallback_report_maybe();
+		}
+	} flush{entry, interpreted};
+
 	while (true)
 	{
 		// Run one instruction in interpreter (TODO)
 		const u32 op = vm::read32(ppu.cia);
 		table.decode(op)(ppu, {op}, vm::_ptr<u32>(ppu.cia), &ppu_ret);
+		interpreted++;
 
 		if (!ppu.raddr || !ppu.use_full_rdata)
 		{

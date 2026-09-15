@@ -22,6 +22,7 @@
 #include "SPUThread.h"
 #include "SPUAnalyser.h"
 #include "SPUFailedBlocks.h"
+#include "Emu/CPU/CPUFallbackStats.h"
 #include "SPUInterpreter.h"
 #include "SPUDisAsm.h"
 #include <algorithm>
@@ -136,6 +137,7 @@ static void spu_reset_failed_blocks()
 {
 	std::lock_guard lock(s_spu_failed_blocks_mutex);
 	s_spu_failed_blocks.clear();
+	s_spu_failed_block_hits.reset();
 }
 
 // The fallback is spu_recompiler_base::old_interpreter, which reads the opcode table, the thread
@@ -172,13 +174,73 @@ static bool spu_interpreter_fallback_available()
 	return true;
 }
 
+// How often each failed block is actually reached.
+//
+// spu_mark_block_compile_failed already logs WHICH blocks the backend gave up on, once each. What
+// it cannot say is whether any of them matters: a block that fails to compile and is never entered
+// costs nothing, and a recompiler fix aimed at it buys nothing. Only the ones dispatch keeps
+// landing on are worth the work, and the difference between those two cases is several orders of
+// magnitude, not a judgement call.
+//
+// Counted at dispatch, so the weight is block entries rather than interpreted instructions -- the
+// interpreter loop for a failed block lives in old_interpreter, which has no cheap place to
+// accumulate. Entries are enough to separate "never runs" from "runs constantly", which is the
+// question being asked here.
+static cpu_fallback_stats s_spu_failed_block_hits;
+
+// Defined in PPUThread.cpp, where both PPU tables live.
+extern void cpu_fallback_report_maybe();
+
 static bool spu_block_compile_failed(u32 addr)
 {
-	reader_lock lock(s_spu_failed_blocks_mutex);
+	{
+		reader_lock lock(s_spu_failed_blocks_mutex);
 
-	// Any recorded range containing addr, so execution stays interpreted for the whole of a block
-	// that cannot be compiled rather than only at its entry.
-	return s_spu_failed_blocks.contains(addr);
+		// Any recorded range containing addr, so execution stays interpreted for the whole of a
+		// block that cannot be compiled rather than only at its entry.
+		if (!s_spu_failed_blocks.contains(addr))
+		{
+			return false;
+		}
+
+		s_spu_failed_block_hits.record(addr);
+	}
+
+	// Outside the lock. The report builds a string and formats up to ten entries; doing that while
+	// holding the reader lock would block spu_mark_block_compile_failed for the duration, and the
+	// report has no need of the set it would be holding.
+	cpu_fallback_report_maybe();
+	return true;
+}
+
+// Emitted by the same rate limit as the PPU report, for the same reason: an unguarded diagnostic
+// in this tree once left a 690 MiB log and became the stall it was describing.
+void spu_report_failed_block_hits()
+{
+	const u64 total = s_spu_failed_block_hits.total();
+
+	if (total == 0)
+	{
+		return;
+	}
+
+	std::string out;
+	fmt::append(out, "SPU fallback: %u dispatches into blocks the backend could not compile", total);
+
+	if (const u64 lost = s_spu_failed_block_hits.unattributed())
+	{
+		fmt::append(out, " (%u unattributed)", lost);
+	}
+
+	const auto top = s_spu_failed_block_hits.snapshot();
+
+	for (usz i = 0; i < top.size() && i < 10; i++)
+	{
+		fmt::append(out, "\n  0x%05x  %u  (%.1f%%)", top[i].first, top[i].second,
+			100. * static_cast<f64>(top[i].second) / static_cast<f64>(total));
+	}
+
+	spu_log.notice("%s", out);
 }
 
 static void spu_mark_block_compile_failed(u32 entry_point, u32 lower_bound = 0, u32 size_bytes = 0)

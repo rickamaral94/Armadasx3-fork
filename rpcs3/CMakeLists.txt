@@ -194,6 +194,7 @@ if(BUILD_RPCS3_TESTS)
             tests/test_dmux_pamf.cpp
             tests/test_spu_analyser.cpp
             tests/test_spu_failed_blocks.cpp
+            tests/test_cpu_fallback_stats.cpp
             tests/test_types_util.cpp
     )
 

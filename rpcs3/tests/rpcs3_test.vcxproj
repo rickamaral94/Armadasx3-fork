@@ -98,6 +98,7 @@
     </ClCompile>
     <ClCompile Include="test_spu_analyser.cpp" />
     <ClCompile Include="test_spu_failed_blocks.cpp" />
+    <ClCompile Include="test_cpu_fallback_stats.cpp" />
     <ClCompile Include="test_fmt.cpp" />
     <ClCompile Include="test_rsx_cfg.cpp" />
     <ClCompile Include="test_rsx_fp_asm.cpp" />
