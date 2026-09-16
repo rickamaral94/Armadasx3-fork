@@ -167,8 +167,13 @@ report "RSX stalls (frames over budget)" 'STALL[:+]' "no stalls recorded."
 # Frame timing lives behind the RSX Profiler setting, off by default. Saying so
 # here is the difference between "this run was fast" and "this run measured
 # nothing", which look identical in a log otherwise.
-report "RSX profiler buckets (frame timing)" 'RSX profiling enabled|scope .* ms' \
-	"the RSX Profiler was off, so this log carries NO frame timing. Turn it on in Core settings to measure FPS."
+# Anchored to rsx_profiler.cpp's own strings: line 785 announces the toggle and
+# the bucket report headline is "RSX profile over %u frames". 'scope ... ms',
+# which this first stood on, is not a format this core prints -- the same mistake
+# as the extension pattern above, caught before it could fail a good log.
+report "RSX profiler buckets (frame timing)" \
+	'RSX profiling enabled|RSX profile over [0-9]+ frames' \
+	"the RSX Profiler was off, so this log carries NO frame timing. Turn it on in 'Todas as configuracoes principais' (search: RSX Profiler) to measure FPS."
 report "driver_env applied" 'driver_env: reading' \
 	"no driver_env.txt was found; Mesa options were not set this run."
 
