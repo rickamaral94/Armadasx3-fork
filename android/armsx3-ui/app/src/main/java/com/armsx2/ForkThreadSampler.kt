@@ -75,6 +75,17 @@ object ForkThreadSampler {
                 // is the 37th token of the remainder.
                 val rest = stat.substring(close + 2).trim().split(' ')
                 if (rest.size < 37) continue
+
+                // Count only threads that are RUNNING OR RUNNABLE.
+                //
+                // The first real capture showed why this is not optional: 38 PPU
+                // threads were sampled every second, nearly all of them blocked. A
+                // blocked thread keeps the "last CPU" it ran on, so counting every
+                // thread measures where idle threads are PARKED, not where work
+                // happens -- and it read as "the PPU lives on the little cluster"
+                // when most of those samples were threads doing nothing at all.
+                if (rest[0] != "R") continue
+
                 val cpu = rest[36].toIntOrNull() ?: continue
                 if (cpu < 0 || cpu >= cpuCount) continue
 
@@ -123,7 +134,9 @@ object ForkThreadSampler {
         }
 
         return buildString {
-            appendLine("$n samples at 1 Hz while a game was running")
+            appendLine("$n samples at 1 Hz while a game was running; RUNNABLE threads only")
+            appendLine("(count in brackets = runnable sightings, so it doubles as how much")
+            appendLine(" that group actually had on a core: $n would be one thread always running)")
             append("thread".padEnd(22))
             for (cpu in 0 until cpuCount) {
                 append(("cpu$cpu").padStart(9))
