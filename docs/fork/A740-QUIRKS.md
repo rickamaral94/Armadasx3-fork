@@ -110,6 +110,13 @@ pipeline de jogo falhava ao compilar (`VK_ERROR_UNKNOWN`) e nada além dos
 overlays desenhava**. `ubo_array_dim()` agora emite `[]` quando há suporte e um
 `[N]` concreto quando não há.
 
+**Observado em 2026-09-16:** no Turnip Mesa 26.3.0-devel a extensão **está
+presente** e entra na lista de 12 extensões carregadas, então neste driver o
+caminho `[]` é o que roda. A premissa "o Adreno não a tem" vale para o driver
+proprietário e para Turnip antigo, não para este. A detecção em runtime torna a
+diferença inócua; fica registrado para que ninguém leia o quirk e conclua que o
+caminho sem extensão é o único exercitado neste aparelho.
+
 ### Q4 — GPUs móveis rejeitam tipos float16 nativos em shader
 
 | | |
@@ -121,6 +128,13 @@ overlays desenhava**. `ubo_array_dim()` agora emite `[]` quando há suporte e um
 O compilador de shader do driver rejeita float16 nativo; o upstream desabilita
 `shader_types_support.allow_float16`. Substituir por float32 custa banda e
 renderiza corretamente.
+
+**Observado em 2026-09-16:** neste aparelho o log diz o oposto — *"GPU/driver
+supports float16 data types natively. Using native float16_t variables if
+possible."* No Turnip Mesa 26.3.0-devel a detecção em runtime **aprova** float16,
+então as medições feitas aqui rodam no caminho nativo, não no substituto em
+float32. Isso muda o que uma comparação de banda significa e precisa constar de
+qualquer linha do `PERF-LOG.md` que toque em precisão de shader.
 
 Não confundir com o `-march=...+fp16` do build, que é FP16 **de CPU** e é outra
 coisa inteiramente — a confusão já custou uma investigação (ver Q1).
@@ -155,8 +169,28 @@ debuggable.
 | | |
 |---|---|
 | Escopo | ARM64, qualquer driver |
-| Estado | **em aberto — precisa de medição no aparelho** |
+| Estado | **FECHADO em 2026-09-16 — medido no aparelho, não se aplica aqui** |
 | Origem | comparação entre RPCS3/ARMSX3, Cemu e Dolphin |
+
+> **Resultado.** Nos 8 núcleos do QCS8550, `CTR_EL0` lê **idêntico**:
+> `0x49444c004`, `dminline=64 iminline=64 erg=64 cwg=64`. O aparelho é
+> genuinamente heterogêneo (X3 + 2×A715 + 2×A710 + 3×A510, confirmado por MIDR),
+> e ainda assim EL0 vê um valor só — que é a única coisa sobre a qual o JIT pode
+> agir. **`__builtin___clear_cache` está seguro neste alvo; o perigo que o
+> Dolphin documenta não se aplica.** Nenhuma mudança a fazer.
+>
+> O sysfs saiu **ilegível** (SELinux barra o app), o que retrospectivamente
+> justifica o desenho: um probe só de sysfs teria devolvido "inconclusivo" e
+> deixado a questão aberta. Ler `CTR_EL0` fixado em cada núcleo respondeu.
+>
+> **Achado lateral, ainda não explorado: `IDC=1`, `DIC=0`.** IDC=1 significa que
+> o hardware mantém coerência de dados até o Point of Unification para busca de
+> instrução — ou seja, **o `DC CVAU` da sequência de publicação é desnecessário**
+> neste SoC. DIC=0 quer dizer que o `IC IVAU` continua obrigatório. Se o
+> `__clear_cache` da compiler-rt do NDK já testa esses bits, não há nada a ganhar;
+> se não testa, há uma economia por bloco publicado. **É uma pergunta sobre o
+> código da compiler-rt, verificável sem aparelho, e está registrada como
+> pendência da Fase 4 — não como ganho até que alguém leia.**
 
 Publicar código recém-gerado no ARM64 exige limpar a linha de dados e invalidar a
 de instrução, num laço que avança pelo **tamanho da linha de cache**. Se esse

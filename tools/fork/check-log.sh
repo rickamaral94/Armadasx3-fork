@@ -124,7 +124,11 @@ need "depth-stencil format support" 'Depth-stencil formats --' \
 	"this build predates the depth report. Phase 5 needs it; rebuild."
 need "memory heaps" 'Detected [0-9]+ MB of device local memory' \
 	"Vulkan device creation did not complete."
-need "requested extensions supported/not" '\[(Supported|Not supported)\] VK_' \
+# device.cpp:1255 prints "%u extensions loaded:" and then "** Using %s" per
+# extension. The pattern here used to be '[Supported] VK_', which this core has
+# never printed -- so a perfectly good log was failed for a missing section that
+# does not exist. Taken from the emitting format string this time.
+need "requested extensions" '[0-9]+ extensions loaded:' \
 	"the extension dump did not run; check the log level."
 
 echo
@@ -135,6 +139,20 @@ report "PPU recompiler fallback" 'PPU fallback: recompiler could not compile' \
 	"the PPU recompiler never gave up. Good news: PPU codegen is not the target."
 report "PPU reservation fallback (by design)" 'PPU fallback: reservation path' \
 	"no reservation interpretation was recorded."
+# A SECOND, older fallback class, and not the one the fork instruments.
+#
+# ppu_recompiler_fallback above is the RUNTIME path: a function with no compiled
+# entry, interpreted on the spot. This one is upstream's COMPILE-TIME notice --
+# the LLVM translator could not build a block and emitted it instruction by
+# instruction instead. The two are independent, and a log can easily show zero of
+# the first and hundreds of the second.
+#
+# It was left unreported until a real log showed 262 such instructions while this
+# script said "no fallback at all". Absence of the fork's own line is not absence
+# of fallback.
+report "PPU blocks compiled per-instruction (compile time)" \
+	'instructions will be compiled on per-instruction basis in total' \
+	"every PPU block compiled as a block."
 report "SPU blocks that failed to compile" 'SPU block 0x[0-9a-f]+ cannot be compiled' \
 	"the SPU backend compiled everything it was asked to."
 report "SPU dispatches into failed blocks" 'SPU fallback: [0-9]+ dispatches' \
@@ -142,7 +160,15 @@ report "SPU dispatches into failed blocks" 'SPU fallback: [0-9]+ dispatches' \
 
 echo
 echo "Session shape:"
-report "stall / hang reports" 'stall|Stall' "no stalls recorded."
+# 'stall|Stall' matched "PKG Installer" forty times on a log with no stalls at
+# all. The real thing is rsx_profiler.cpp printing "STALL:" / "STALL+<ms>:", so
+# the pattern is anchored to that and the count means something again.
+report "RSX stalls (frames over budget)" 'STALL[:+]' "no stalls recorded."
+# Frame timing lives behind the RSX Profiler setting, off by default. Saying so
+# here is the difference between "this run was fast" and "this run measured
+# nothing", which look identical in a log otherwise.
+report "RSX profiler buckets (frame timing)" 'RSX profiling enabled|scope .* ms' \
+	"the RSX Profiler was off, so this log carries NO frame timing. Turn it on in Core settings to measure FPS."
 report "driver_env applied" 'driver_env: reading' \
 	"no driver_env.txt was found; Mesa options were not set this run."
 
