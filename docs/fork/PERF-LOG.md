@@ -74,6 +74,75 @@ está errada e a atribuição volta para a mesa.
 precisão de emulação por velocidade. Sem suíte PPU/SPU limpa e sem comparação de
 imagem, um ganho aqui não é adotável nem como perfil por jogo.
 
+### H1 — FALSIFICADA em 2026-09-16 15:33
+
+**Fonte:** `armsx3-amaral-diag-20260916-1533.zip`, mesma build, mesmo driver,
+`Reservas precisas de SPU` **desligada**, profiler ligado, 72 relatórios. O log
+confirma `accurate_reservations=off` em todos.
+
+A intervenção funcionou perfeitamente **no próprio contador**:
+
+| | accurate=ON | accurate=off | Δ |
+|---|---|---|---|
+| `PUTLLC`/quadro | 168k–204k | **35k–36k** | −82% |
+| `PUTLLC` que falham | 23–25% | **0,9–1,0%** | −96% |
+| `vm::writer_lock`/quadro | ~10.000 | **0** | −100% |
+| SPU executando (de 6) | 4,4–4,8 | 4,5–4,9 | ~igual |
+| **`Idle: FIFO empty`** | **39,8%** | **39,4%** | **inalterado** |
+| ms/quadro (mediana da cena pesada) | 120,4 | 102,7 | −15% |
+
+**Veredito: H1 está errada.** Removemos 165 mil operações atômicas por quadro e
+as dez mil tomadas de lock por quadro — e a fração do quadro em que o
+renderizador fica **sem nada para desenhar não se moveu**: 39,8% → 39,4%. Se a
+contenção de reserva fosse o item que ditava o ritmo, essa linha teria caído.
+
+Os −15% de mediana **não sustentam nada**, e é importante dizer por quê em vez
+de vendê-los: as faixas se sobrepõem (ON 34–140, off 74–144), é uma sessão de
+cada, e **as cenas não são as mesmas** — a captura com a opção desligada tem
+3.886 draws/quadro contra 2.881, e alvos de 1408×1408 que não aparecem na outra.
+Um número desses, com esse confound, é ruído com sinal de mais.
+
+O que dá para afirmar é o mecanismo, e esse independe de cena: o contador
+diretamente afetado caiu 82% e o desfecho não acompanhou.
+
+**Consequência:** o lado convidado continua não alimentando o FIFO, e agora
+sabemos que não é sincronização de reserva. Sobra **vazão de execução de SPU** —
+o código que o recompilador LLVM gera. Que é exatamente onde a Fase 4 deveria
+estar olhando, e agora com evidência em vez de suposição.
+
+### Onde o tempo de SPU está (amostras de PC, quadros lentos)
+
+    pc=0x10a80   13,3–15,6%
+    pc=0x0d7c0   10,3–12,3%
+    pc=0x03700    5,9–6,3%
+    pc=0x03500    4,2–4,9%
+
+**Três a quatro blocos concentram ~30% do tempo de SPU.** Endereço de local
+store não identifica o programa sozinho — jobs diferentes carregam no mesmo LS —
+então isso é um ponteiro para investigar, não um alvo confirmado.
+
+### H2 — candidata: o poll de fence custa 13 ms/quadro no Turnip
+
+`VKGSRenderTypes.hpp` já registra que `vkGetFenceStatus` no Adreno media **19,7
+ms por chamada** e devolvia `VK_NOT_READY` zero vezes em 300 quadros — "a wait
+wearing a query's name" — e por isso foi trocado por `vkWaitForFences` com
+timeout zero.
+
+A troca ajudou e **não resolveu**. Medido agora:
+
+    fence polls  12,8/quadro, 1.047.841 ns cada, 0,0% not ready
+    Fence poll   13,371 ms/quadro   12,7%
+
+Um `vkWaitForFences(timeout=0)` numa fence que **sempre** já está sinalizada
+custando 1 ms por chamada é 100× o esperado. É específico de driver, é do
+mandato deste fork, e **não troca precisão por velocidade** — é pedir menos ao
+driver.
+
+**Mas não é o próximo passo, e a razão é a mesma que vale para o NOP:** a thread
+RSX já fica ~40% ociosa. Economizar 13 ms nela hoje vira mais ociosidade, não
+mais quadros. **H2 só vale depois que o lado convidado deixar de ser o gargalo.**
+Fica registrada agora para não ser redescoberta.
+
 ### Candidatos secundários, registrados e NÃO perseguidos agora
 
 - **`NV4097_NO_OPERATION`: 123.655/quadro, 48,6% de todos os métodos.** Metade do
