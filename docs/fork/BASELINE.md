@@ -13,6 +13,27 @@ cache, no AYN Odin 2 Portal (QCS8550 / Adreno 740).
 
 ---
 
+## Captura 2 — 2026-09-16 15:03, com frametime
+
+Mesma build, mesmo driver, mesmo jogo, `RSX Profiler` ligado. 44 relatórios de
+300 quadros. **Uma sessão só — nada aqui é mediana de 5 runs ainda.**
+
+| cena | ms/quadro | quadros >33 ms | quadros >100 ms | pior |
+|---|---|---|---|---|
+| menu (0:44–0:47) | 17,5 | 0–6 de 300 | 0 | 25–92 ms |
+| jogo (0:47:11 em diante) | **121–140** | **100%** | 60–90% | **351 ms** |
+
+**Atribuição: o lado convidado (SPU), não a GPU.** A thread RSX fica **39,8% do
+quadro ociosa esperando FIFO**, enquanto o jogo registra 367 vezes
+`BATCHJOB: AddJob: waiting for room in job list` e o perfil mostra ~200 mil
+`PUTLLC` por quadro com 24% de falha. O detalhamento e a hipótese falsificável
+estão em `PERF-LOG.md` (entrada de 2026-09-16).
+
+Memória livre no fim: 7,2 GB — **sem pressão**, o que exclui vazamento (Q1) para
+esta sessão.
+
+---
+
 ## Captura 1 — 2026-09-16, ambiente (sem FPS)
 
 Primeira execução do APK do fork em hardware. Fonte:
