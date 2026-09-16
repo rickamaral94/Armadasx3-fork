@@ -581,6 +581,7 @@ fun AppTab() {
         BackupRestoreRows()
 
         DiagnosticsExportRow()
+        MeasurementShortcutRows()
 
         ToggleRow(
             label = str("app.blockHome"),
@@ -1199,6 +1200,71 @@ private fun BackupRestoreRows() {
     }
     BackupActionRow("♻️", "app.reset", "app.reset.desc", "", busy, doReset)
 }
+
+/**
+ * Fork-only: the two settings a measurement session has to touch, next to the
+ * export button instead of three levels into the core's own tree.
+ *
+ * Both already exist elsewhere -- RSX Profiler in "All Core Settings" under a
+ * screen labelled advanced-with-no-safety-rails, SPU Block Size in Performance
+ * and in the in-game menu. Neither is findable when what you are trying to do is
+ * "take a measurement", and both are needed EVERY session: the profiler because
+ * it is off by default and is the only source of frame timing, the block size
+ * because it is the Phase 4 variable under test. A fresh install resets both,
+ * which the fork's CI makes a frequent event (ADR-0005).
+ */
+@Composable
+private fun MeasurementShortcutRows() {
+    // The profiler is deliberately NOT persisted in the app's settings model.
+    //
+    // ConfigStore carries two separate one-shot migrations whose whole job is
+    // purging recorded "Video@@RSX Profiler" values, because a diagnostic left on
+    // by accident follows an install around and costs performance silently. So
+    // this writes the core node directly and reads it back the same way: on every
+    // launch the core starts from its own default, which is off.
+    var profiling by remember {
+        mutableStateOf(
+            runCatching { net.rpcsx.RPCSX.instance.settingsGet(PROFILER_PATH).contains("true") }
+                .getOrDefault(false),
+        )
+    }
+
+    ToggleRow(
+        label = str("app.diag.profiler"),
+        value = profiling,
+        description = str("app.diag.profiler.desc"),
+    ) { wanted ->
+        // Dynamic in the core (system_config.h marks it so), which is why it can be
+        // flipped mid-session -- and why a failed write must not leave the switch
+        // showing a state the core is not in.
+        val ok = runCatching {
+            net.rpcsx.RPCSX.instance.settingsSet(PROFILER_PATH, if (wanted) "true" else "false")
+        }.getOrDefault(false)
+        profiling = if (ok) wanted else profiling
+    }
+
+    SettingsDivider()
+
+    // Block size DOES go through the curated model. It is not dynamic, it is a
+    // real preference, and a raw core write here would be overwritten the next
+    // time any settings screen applies -- the override-versus-curated collision
+    // ConfigStore documents at length.
+    val settings = com.armsx2.ui.InGameOverlay.settingsState.value
+    SegmentedGridRow(
+        label = str("app.diag.blockSize"),
+        options = listOf("Safe", "Mega", "Giga"),
+        selectedIndex = settings.ps3.spuBlockSize.coerceIn(0, 2),
+        description = str("app.diag.blockSize.desc"),
+        onChange = { chosen ->
+            com.armsx2.ui.InGameOverlay.saveSettings(
+                settings.copy(ps3 = settings.ps3.copy(spuBlockSize = chosen)),
+            )
+        },
+    )
+}
+
+/** Section@@name, the shape CoreSettingOverrides and settingsSet both use. */
+private const val PROFILER_PATH = "Video@@RSX Profiler"
 
 /**
  * Fork-only: export the emulator log, the crash dumps and a device report as one
