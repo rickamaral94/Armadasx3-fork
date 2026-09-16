@@ -168,6 +168,13 @@ object ForkDiagnostics {
         append(procCpuInfo())
         appendLine()
 
+        appendLine("[thread placement]")
+        appendLine("# Which core each emulator thread ran on, sampled at 1 Hz while a game")
+        appendLine("# was running. SPU work on the little cluster costs throughput for")
+        appendLine("# reasons that have nothing to do with the code the recompiler emits.")
+        append(ForkThreadSampler.report(cpuKinds()))
+        appendLine()
+
         appendLine("[memory]")
         append(readFirstLines("/proc/meminfo", 3))
     }
@@ -191,6 +198,39 @@ object ForkDiagnostics {
             }
             .joinToString("\n", postfix = "\n")
     }.getOrElse { "unreadable: ${it.message}\n" }
+
+    /**
+     * A short label per CPU index, so the placement table reads as "A510" rather
+     * than "cpu2" and the answer is legible without cross-referencing.
+     *
+     * From /proc/cpuinfo's MIDR parts, which ARE readable here -- unlike the sysfs
+     * cache and capacity nodes, which SELinux blocked on this device (see the
+     * 2026-09-16 capture). The part list covers the cores this fork targets; an
+     * unknown part prints its raw id rather than a guess.
+     */
+    private fun cpuKinds(): List<String> = runCatching {
+        val known = mapOf(
+            0xd46 to "A510", 0xd47 to "A710", 0xd4d to "A715", 0xd4e to "X3",
+            0xd48 to "X2", 0xd44 to "X1", 0xd0d to "A77", 0xd41 to "A78",
+            0xd05 to "A55", 0xd03 to "A53",
+        )
+        val kinds = ArrayList<String>()
+        var pending: String? = null
+        for (line in File("/proc/cpuinfo").readLines()) {
+            val key = line.substringBefore(':').trim().lowercase()
+            val value = line.substringAfter(':', "").trim()
+            // "processor" opens an entry and "CPU part" closes the part of it we
+            // want; cpuinfo lists ONLY online cores, so this follows its order
+            // rather than indexing by cpu number.
+            if (key == "processor") pending = "?"
+            if (key == "cpu part" && pending != null) {
+                val part = value.removePrefix("0x").toIntOrNull(16)
+                kinds += known[part] ?: ("part" + (part?.toString(16) ?: "?"))
+                pending = null
+            }
+        }
+        kinds
+    }.getOrDefault(emptyList())
 
     private fun readFirstLines(path: String, count: Int): String = runCatching {
         File(path).readLines().take(count).joinToString("\n", postfix = "\n")

@@ -33,6 +33,11 @@ class Pasx2Application : Application(), ImageLoaderFactory {
 		super.onCreate()
 		appContext = applicationContext
 		installCrashLogging()
+
+		// Fork: thread-placement sampling for the Phase 4 question (are SPU threads
+		// landing on the little cluster?). Idle until a game is actually running,
+		// and its own failure can never take the app down -- see ForkThreadSampler.
+		runCatching { ForkThreadSampler.start() }
 	}
 
 	companion object {
