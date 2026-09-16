@@ -379,3 +379,57 @@ launcher — mas é uma diferença entre binários e por isso está registrada.
 
 Restaurar é só soltar os clipes reais nos mesmos treze nomes: nenhuma mudança de
 código, e o `.gitignore` local agora permite commitá-los.
+
+---
+
+## ADR-0005 — Builds do CI continuam com chave de assinatura efêmera
+
+**Data:** 2026-09-16
+**Status:** aceito, com custo conhecido e reversível
+**Decisão do operador**
+
+### Contexto
+
+O `android-fork.yml` nunca passa `armsx3.uploadSigning`, então o Gradle usa o
+`signingConfig` de debug. O keystore de debug é criado pelo AGP na primeira
+utilização, e cada execução do CI é uma máquina limpa — logo **cada build sai
+com uma chave diferente**. O Android recusa atualizar um app cuja assinatura
+mudou:
+
+    Como o pacote tem um conflito com um pacote já existente, o app não foi instalado.
+
+Apareceu na primeira tentativa de atualizar (build `2599205b` por cima de
+`9a0c23e2`), que é exatamente quando deveria aparecer.
+
+### Alternativas apresentadas
+
+1. Keystore num secret do GitHub, CI passa `armsx3.uploadSigning`. Correto, sem
+   chave privada no repositório; exige gerar o keystore uma vez.
+2. Keystore de debug fixo commitado. Zero trabalho, mas é chave privada em
+   repositório público.
+
+### Decisão
+
+**Nenhuma das duas por ora.** Fica como está.
+
+### Consequências, que não são pequenas
+
+- **Toda nova build exige desinstalar e reinstalar.** Não há caminho que
+  preserve os dados: o assistente deixa escolher o volume, mas o caminho
+  continua sendo `Android/data/<pacote>/files` do volume escolhido, que o
+  Android apaga no desinstalar.
+- **Perde firmware, jogos instalados por .pkg, save data e configs** a cada
+  atualização. O backup interno (Configurações → App) cobre saves, troféus,
+  perfis e configurações — **não** cobre firmware nem jogos instalados.
+- **Consequência de medição, e é a que mais importa aqui:** reinstalar zera o
+  cache de shaders e os caches de PPU/SPU, que vivem no data root. Toda primeira
+  sessão depois de uma atualização é **cache frio**. Comparar uma medição
+  pós-instalação com uma medição de cache quente mistura as duas colunas da
+  matriz do `BASELINE.md`, que a seção 4 manda manter separadas. Qualquer linha
+  de `PERF-LOG.md` medida logo após uma instalação precisa dizer "frio".
+
+### Como reverter
+
+Qualquer uma das duas alternativas acima, a qualquer momento. A partir daí as
+builds atualizam por cima e o problema some — mas a primeira instalação com a
+chave nova ainda exige um desinstalar, porque ela também difere da atual.
